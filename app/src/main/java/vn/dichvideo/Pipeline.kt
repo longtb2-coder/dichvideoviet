@@ -66,7 +66,15 @@ object Pipeline {
         if (!ReturnCode.isSuccess(s.returnCode)) error("FFmpeg lỗi: " + (s.output ?: "").takeLast(300))
     }
 
-    suspend fun run(ctx: Context, video: Uri, srt: Uri?, ocrIntervalSeconds: Double = 1.5, voiceId: String = Models.DEFAULT_VOICE, log: (String) -> Unit): PipelineOutput =
+    suspend fun run(
+        ctx: Context, video: Uri, srt: Uri?, ocrIntervalSeconds: Double = 1.5,
+        voiceId: String = Models.DEFAULT_VOICE,
+        originalVolume: Float = 0f,
+        translatedVolume: Float = 1f,
+        coverOriginalText: Boolean = false,
+        coverHeightPercent: Float = 18f,
+        log: (String) -> Unit
+    ): PipelineOutput =
         withContext(Dispatchers.IO) {
             require(ocrIntervalSeconds in 0.5..10.0) { "Khoảng quét chữ phải từ 0,5 đến 10 giây." }
             Models.ensure(ctx, voiceId, log)
@@ -119,15 +127,20 @@ object Pipeline {
                 val ms = (vi[i].start * 1000).toLong()
                 "[${i + 1}:a]adelay=$ms|$ms[a$i]"
             }
-            val mix = if (clips.size == 1) "[a0]apad[out]"
+            val voiceMix = if (clips.size == 1) "[a0]volume=$translatedVolume,apad[voice]"
             else clips.indices.joinToString("") { "[a$it]" } +
-                "amix=inputs=${clips.size}:duration=longest:normalize=0:dropout_transition=0,apad[out]"
+                "amix=inputs=${clips.size}:duration=longest:normalize=0:dropout_transition=0,volume=$translatedVolume,apad[voice]"
+            val audioMix = "[0:a]volume=$originalVolume[original];[original][voice]amix=inputs=2:duration=longest:normalize=0,apad[out]"
             val escapedSubtitlePath = subtitleFile.absolutePath.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
-            val subtitleFilter = "subtitles='$escapedSubtitlePath':fontsdir='/system/fonts':force_style='FontName=Noto Sans,FontSize=24,Outline=2,Shadow=1,Alignment=2,MarginV=30'"
+            val subtitleTextFilter = "subtitles='$escapedSubtitlePath':fontsdir='/system/fonts':force_style='FontName=Noto Sans,FontSize=24,Outline=2,Shadow=1,Alignment=2,MarginV=30'"
+            val coverFilter = if (coverOriginalText) {
+                val h = (coverHeightPercent.coerceIn(8f, 30f) / 100f)
+                "drawbox=x=0:y=ih*(1-$h):w=iw:h=ih*$h:color=black@1:t=fill,$subtitleTextFilter"
+            } else subtitleTextFilter
             args += listOf(
-                "-filter_complex", "$delays;$mix",
+                "-filter_complex", "$delays;$voiceMix;$audioMix",
                 "-map", "0:v:0", "-map", "[out]", "-map", "$subtitleInputIndex:s:0",
-                "-vf", subtitleFilter,
+                "-vf", coverFilter,
                 "-c:v", "mpeg4", "-q:v", "3", "-pix_fmt", "yuv420p",
                 "-c:a", "aac", "-b:a", "128k", "-c:s", "mov_text", "-metadata:s:s:0", "language=vie",
                 "-movflags", "+faststart", "-t", "%.3f".format(java.util.Locale.US, videoDurationSeconds),
