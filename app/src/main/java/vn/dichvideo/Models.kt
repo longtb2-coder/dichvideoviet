@@ -14,8 +14,14 @@ object Models {
     private const val TTS = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/"
     const val SENSE_URL = ASR + "sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2"
     const val VAD_URL = ASR + "silero_vad.onnx"
-    // Giọng đọc tiếng Việt (Piper). Đổi sang vits-piper-vi_VN-25hours_single-low nếu muốn giọng khác.
-    const val TTS_URL = TTS + "vits-piper-vi_VN-vais1000-medium.tar.bz2"
+    const val DEFAULT_VOICE = "vais1000"
+
+    private fun voiceArchive(voiceId: String): String = TTS + when (voiceId) {
+        "25hours_single" -> "vits-piper-vi_VN-25hours_single-low.tar.bz2"
+        "vivos" -> "vits-piper-vi_VN-vivos-x_low.tar.bz2"
+        else -> "vits-piper-vi_VN-vais1000-medium.tar.bz2"
+    }
+    private fun ttsDir(ctx: Context, voiceId: String) = File(root(ctx), "tts-$voiceId")
 
     private val http = OkHttpClient.Builder().readTimeout(60, TimeUnit.SECONDS).build()
 
@@ -23,14 +29,14 @@ object Models {
     fun vad(ctx: Context) = File(root(ctx), "vad/silero_vad.onnx")
     fun senseModel(ctx: Context) = File(root(ctx), "sense").walkTopDown().first { it.name == "model.int8.onnx" }
     fun senseTokens(ctx: Context) = File(root(ctx), "sense").walkTopDown().first { it.name == "tokens.txt" }
-    fun ttsModel(ctx: Context) = File(root(ctx), "tts").walkTopDown().first { it.isFile && it.extension == "onnx" }
-    fun ttsTokens(ctx: Context) = File(root(ctx), "tts").walkTopDown().first { it.name == "tokens.txt" }
-    fun ttsData(ctx: Context) = File(root(ctx), "tts").walkTopDown().first { it.isDirectory && it.name == "espeak-ng-data" }
+    fun ttsModel(ctx: Context, voiceId: String = DEFAULT_VOICE) = ttsDir(ctx, voiceId).walkTopDown().first { it.isFile && it.extension == "onnx" }
+    fun ttsTokens(ctx: Context, voiceId: String = DEFAULT_VOICE) = ttsDir(ctx, voiceId).walkTopDown().first { it.name == "tokens.txt" }
+    fun ttsData(ctx: Context, voiceId: String = DEFAULT_VOICE) = ttsDir(ctx, voiceId).walkTopDown().first { it.isDirectory && it.name == "espeak-ng-data" }
 
-    fun ensure(ctx: Context, log: (String) -> Unit) {
+    fun ensure(ctx: Context, voiceId: String = DEFAULT_VOICE, log: (String) -> Unit) {
         val base = root(ctx)
         fetchArchive(File(base, "sense"), SENSE_URL, "mô hình nhận dạng (khoảng 230 MB)", log)
-        fetchArchive(File(base, "tts"), TTS_URL, "giọng đọc tiếng Việt", log)
+        fetchArchive(ttsDir(ctx, voiceId), voiceArchive(voiceId), "giọng đọc tiếng Việt ($voiceId)", log)
         if (!vad(ctx).exists()) {
             vad(ctx).parentFile!!.mkdirs()
             download(VAD_URL, vad(ctx), "bộ cắt câu", log)
@@ -53,7 +59,7 @@ object Models {
     private fun archiveReady(dir: File): Boolean = when (dir.name) {
         "sense" -> dir.walkTopDown().any { it.isFile && it.name == "model.int8.onnx" } &&
             dir.walkTopDown().any { it.isFile && it.name == "tokens.txt" }
-        "tts" -> dir.walkTopDown().any { it.isFile && it.extension == "onnx" } &&
+        else -> dir.name.startsWith("tts-") && dir.walkTopDown().any { it.isFile && it.extension == "onnx" } &&
             dir.walkTopDown().any { it.isFile && it.name == "tokens.txt" } &&
             dir.walkTopDown().any { it.isDirectory && it.name == "espeak-ng-data" }
         else -> false
