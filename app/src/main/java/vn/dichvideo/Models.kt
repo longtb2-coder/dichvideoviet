@@ -59,6 +59,15 @@ object Models {
         else -> false
     }
 
+    private fun archiveReady(dir: File): Boolean = when (dir.name) {
+        "sense" -> dir.walkTopDown().any { it.isFile && it.name == "model.int8.onnx" } &&
+            dir.walkTopDown().any { it.isFile && it.name == "tokens.txt" }
+        "tts" -> dir.walkTopDown().any { it.isFile && it.extension == "onnx" } &&
+            dir.walkTopDown().any { it.isFile && it.name == "tokens.txt" } &&
+            dir.walkTopDown().any { it.isDirectory && it.name == "espeak-ng-data" }
+        else -> false
+    }
+
     private fun download(url: String, out: File, label: String, log: (String) -> Unit) {
         log("Tải $label…")
         http.newCall(Request.Builder().url(url).build()).execute().use { r ->

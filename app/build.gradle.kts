@@ -36,6 +36,10 @@ dependencies {
     implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
     implementation("com.google.mlkit:text-recognition-japanese:16.0.1")
     implementation("com.google.mlkit:text-recognition-korean:16.0.1")
+    implementation("com.google.mlkit:text-recognition:16.0.1")
+    implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
+    implementation("com.google.mlkit:text-recognition-japanese:16.0.1")
+    implementation("com.google.mlkit:text-recognition-korean:16.0.1")
     // FFmpeg (fork còn duy trì của ffmpeg-kit)
     implementation("com.moizhassan.ffmpeg:ffmpeg-kit-16kb:6.1.1")
     // sherpa-onnx (nhận dạng giọng nói + VAD + đọc giọng): file .aar được tải vào app/libs/ khi build
