@@ -55,6 +55,28 @@ fun Screen() {
         }
     }
 
+    val exportVideo = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("video/mp4")) { destination ->
+        val sourceText = outputVideoUri
+        if (destination != null && sourceText != null) {
+            scope.launch {
+                busy = true
+                try {
+                    withContext(Dispatchers.IO) {
+                        val sourceUri = Uri.parse(sourceText)
+                        val input = ctx.contentResolver.openInputStream(sourceUri)
+                            ?: error("Không mở được video nguồn để xuất.")
+                        val output = ctx.contentResolver.openOutputStream(destination, "w")
+                            ?: error("Không mở được vị trí bạn chọn để ghi video.")
+                        input.use { src -> output.use { dst -> src.copyTo(dst) } }
+                    }
+                    log += "\\nXuất video thành công tới vị trí bạn vừa chọn."
+                } catch (e: Exception) {
+                    log += "\\nXuất video thất bại: ${e.message ?: "lỗi không rõ"}"
+                } finally { busy = false }
+            }
+        }
+    }
+
     Column(
         Modifier.fillMaxSize().systemBarsPadding().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -131,6 +153,17 @@ fun Screen() {
                 },
                 modifier = Modifier.fillMaxWidth()
             ) { Text("▶ Mở video vừa tạo") }
+        }
+            Button(
+                enabled = !busy,
+                onClick = {
+                    val name = outputVideoUri?.let { Uri.parse(it).lastPathSegment }
+                        ?.takeIf { it.endsWith(".mp4", ignoreCase = true) }
+                        ?: "VideoVietHoa.mp4"
+                    exportVideo.launch(name)
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("⬇ Xuất video — chọn nơi lưu") }
         }
         Text(log)
     }
