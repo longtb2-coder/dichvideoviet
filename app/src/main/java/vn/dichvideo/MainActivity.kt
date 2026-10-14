@@ -105,7 +105,7 @@ fun Screen() {
                         val out = Pipeline.run(ctx, video!!, srt, interval!!) { message ->
                             scope.launch { log += message + "\\n" }
                         }
-                        log += "Xong! Video lưu tại:\\n${out.absolutePath}"
+                        log += "Xong! Video đã lưu thành công.\\nThư mục: ${out.location}\\nVideo: ${out.videoName}\\nPhụ đề riêng: ${out.subtitleName}\\nBạn có thể mở Ảnh/Thư viện hoặc Quản lý tệp để tìm video."
                     } catch (e: Exception) {
                         log += "Lỗi: ${e.message}"
                     }
