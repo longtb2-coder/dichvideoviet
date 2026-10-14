@@ -101,6 +101,15 @@ object Pipeline {
             val outVideo = File(work, "vi_$stamp.mp4")
             val subtitleFile = File(work, "vi_$stamp.srt").apply { writeText(Srt.write(vi), Charsets.UTF_8) }
 
+            val metadata = MediaMetadataRetriever()
+            val videoDurationSeconds = try {
+                metadata.setDataSource(input.absolutePath)
+                (metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toDoubleOrNull() ?: 0.0) / 1000.0
+            } finally {
+                metadata.release()
+            }
+            require(videoDurationSeconds > 0.0) { "Không đọc được thời lượng video đầu vào." }
+
             val args = mutableListOf("-y", "-i", input.path)
             clips.forEach { args += listOf("-i", it.path) }
             // Thêm SRT như một track phụ đề MP4 dự phòng; phụ đề chính vẫn được đốt trực tiếp lên hình.
@@ -121,7 +130,7 @@ object Pipeline {
                 "-vf", subtitleFilter,
                 "-c:v", "mpeg4", "-q:v", "3", "-pix_fmt", "yuv420p",
                 "-c:a", "aac", "-b:a", "128k", "-c:s", "mov_text", "-metadata:s:s:0", "language=vie",
-                "-movflags", "+faststart", "-shortest",
+                "-movflags", "+faststart", "-t", "%.3f".format(java.util.Locale.US, videoDurationSeconds),
                 outVideo.path
             )
             ff(*args.toTypedArray())
