@@ -38,6 +38,13 @@ fun Screen() {
     var srt by remember { mutableStateOf<Uri?>(null) }
     var videoUrl by remember { mutableStateOf("") }
     var ocrInterval by remember { mutableStateOf("1.5") }
+    var voiceId by remember { mutableStateOf("vais1000") }
+    var voiceMenuExpanded by remember { mutableStateOf(false) }
+    val voiceLabel = when (voiceId) {
+        "25hours_single" -> "Giọng 2 — 25hours (nhẹ, low)"
+        "vivos" -> "Giọng 3 — VIVOS (nhẹ, x-low)"
+        else -> "Giọng 1 — VAIS1000 (medium, mặc định)"
+    }
     var log by remember { mutableStateOf("") }
     var outputVideoUri by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
@@ -82,7 +89,28 @@ fun Screen() {
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text("Dịch video sang giọng Việt", style = MaterialTheme.typography.titleLarge)
-        Text("Chạy offline. Lần đầu app tải khoảng 300 MB mô hình (cần mạng một lần).")
+        Text("Chạy offline sau khi tải mô hình. Lần đầu cần mạng để tải nhận dạng, dịch và giọng đọc.")
+        Text("Chọn giọng đọc tiếng Việt", style = MaterialTheme.typography.titleMedium)
+        Box {
+            OutlinedButton(onClick = { voiceMenuExpanded = true }, enabled = !busy) {
+                Text(voiceLabel)
+            }
+            DropdownMenu(expanded = voiceMenuExpanded, onDismissRequest = { voiceMenuExpanded = false }) {
+                DropdownMenuItem(
+                    text = { Text("Giọng 1 — VAIS1000 (medium, mặc định)") },
+                    onClick = { voiceId = "vais1000"; voiceMenuExpanded = false }
+                )
+                DropdownMenuItem(
+                    text = { Text("Giọng 2 — 25hours (low)") },
+                    onClick = { voiceId = "25hours_single"; voiceMenuExpanded = false }
+                )
+                DropdownMenuItem(
+                    text = { Text("Giọng 3 — VIVOS (x-low)") },
+                    onClick = { voiceId = "vivos"; voiceMenuExpanded = false }
+                )
+            }
+        }
+        Text("Giọng được tải riêng ở lần đầu chọn; lần sau có thể dùng ngoại tuyến.")
         Button(enabled = !busy, onClick = { pickVideo.launch(arrayOf("video/*")) }) {
             Text(if (video == null) "① Chọn video trong điện thoại" else "Đã chọn video ✓")
         }
@@ -126,7 +154,7 @@ fun Screen() {
                     try {
                         val interval = ocrInterval.replace(',', '.').toDoubleOrNull()
                         require(interval != null && interval in 0.5..10.0) { "Khoảng quét phải từ 0,5 đến 10 giây." }
-                        val out = Pipeline.run(ctx, video!!, srt, interval!!) { message ->
+                        val out = Pipeline.run(ctx, video!!, srt, interval!!, voiceId) { message ->
                             scope.launch { log += message + "\n" }
                         }
                         outputVideoUri = out.videoUri
