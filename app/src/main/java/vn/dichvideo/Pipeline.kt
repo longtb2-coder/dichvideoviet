@@ -32,7 +32,7 @@ import java.nio.ByteOrder
 
 data class Seg(val start: Double, val end: Double, val text: String)
 
-data class PipelineOutput(val videoName: String, val subtitleName: String, val location: String)
+data class PipelineOutput(val videoName: String, val subtitleName: String, val location: String, val videoUri: String)
 
 object Srt {
     private val TIME = Regex("""(\d+):(\d+):(\d+)[,.](\d+)""")
@@ -126,9 +126,10 @@ object Pipeline {
             val videoName = outVideo.name
             val subtitleName = subtitleFile.name
             val location: String
+            val savedVideoUri: Uri
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 log("Đang lưu video vào thư mục Movies để có thể tìm trong Thư viện…")
-                publishToMediaStore(
+                savedVideoUri = publishToMediaStore(
                     ctx, outVideo, videoName, "video/mp4",
                     "${Environment.DIRECTORY_MOVIES}/VideoVietHoa",
                     MediaStore.Video.Media.EXTERNAL_CONTENT_URI
@@ -143,17 +144,19 @@ object Pipeline {
                     log("Video đã lưu; chưa lưu được file SRT riêng: ${e.message ?: "lỗi không rõ"}.")
                 }
                 location = "Bộ nhớ trong/Movies/VideoVietHoa"
-                log("Đã lưu video vào Thư viện; mở ứng dụng Ảnh/Thư viện hoặc Quản lý tệp > Movies > VideoVietHoa.")
+                log("Đã lưu video vào Thư viện; có thể bấm nút Mở video vừa tạo ngay bên dưới.")
             } else {
                 val outDir = File(ctx.getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: File(ctx.filesDir, "Movies"), "VideoVietHoa")
                 if (!outDir.exists() && !outDir.mkdirs()) error("Không tạo được thư mục đầu ra: $outDir")
-                outVideo.copyTo(File(outDir, videoName), overwrite = true)
+                val publicVideoFile = File(outDir, videoName)
+                outVideo.copyTo(publicVideoFile, overwrite = true)
                 subtitleFile.copyTo(File(outDir, subtitleName), overwrite = true)
+                savedVideoUri = Uri.fromFile(publicVideoFile)
                 location = outDir.absolutePath
                 log("Android phiên bản cũ: video nằm trong thư mục riêng của ứng dụng.")
             }
             log("Đã tạo MP4 có lồng tiếng Việt và phụ đề đốt trực tiếp vào hình.")
-            PipelineOutput(videoName, subtitleName, location)
+            PipelineOutput(videoName, subtitleName, location, savedVideoUri.toString())
         }
 
     /** Lưu media vào thư mục công khai để người dùng nhìn thấy trong Thư viện/Quản lý tệp. */
