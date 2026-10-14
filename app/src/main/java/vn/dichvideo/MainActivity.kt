@@ -75,12 +75,12 @@ fun Screen() {
             onClick = {
                 scope.launch {
                     busy = true
-                    log = "Đang tải video từ link trực tiếp…\\n"
+                    log = "Đang tải video từ link trực tiếp…\n"
                     try {
                         video = downloadDirectVideo(ctx, videoUrl.trim())
-                        log += "Đã tải video xong.\\n"
+                        log += "Đã tải video xong.\n"
                     } catch (e: Exception) {
-                        log += "Không tải được video: ${e.message}\\n"
+                        log += "Không tải được video: ${e.message}\n"
                     } finally { busy = false }
                 }
             }
@@ -103,9 +103,9 @@ fun Screen() {
                         val interval = ocrInterval.replace(',', '.').toDoubleOrNull()
                         require(interval != null && interval in 0.5..10.0) { "Khoảng quét phải từ 0,5 đến 10 giây." }
                         val out = Pipeline.run(ctx, video!!, srt, interval!!) { message ->
-                            scope.launch { log += message + "\\n" }
+                            scope.launch { log += message + "\n" }
                         }
-                        log += "Xong! Video đã lưu thành công.\\nThư mục: ${out.location}\\nVideo: ${out.videoName}\\nPhụ đề riêng: ${out.subtitleName}\\nBạn có thể mở Ảnh/Thư viện hoặc Quản lý tệp để tìm video."
+                        log += "Xong! Video đã lưu thành công.\nThư mục: ${out.location}\nVideo: ${out.videoName}\nPhụ đề riêng: ${out.subtitleName}\nBạn có thể mở Ảnh/Thư viện hoặc Quản lý tệp để tìm video."
                     } catch (e: Exception) {
                         log += "Lỗi: ${e.message}"
                     }
