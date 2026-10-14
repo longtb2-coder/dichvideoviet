@@ -39,14 +39,24 @@ object Models {
 
     private fun fetchArchive(dir: File, url: String, label: String, log: (String) -> Unit) {
         val done = File(dir, ".done")
-        if (done.exists()) return
+        if (done.exists() && archiveReady(dir)) return
         dir.deleteRecursively(); dir.mkdirs()
         val tmp = File(dir, "download.tar.bz2")
         download(url, tmp, label, log)
         log("Giải nén $label…")
         extract(tmp, dir)
         tmp.delete()
+        require(archiveReady(dir)) { "Gói $label thiếu tệp mô hình cần thiết." }
         done.writeText("ok")
+    }
+
+    private fun archiveReady(dir: File): Boolean = when (dir.name) {
+        "sense" -> dir.walkTopDown().any { it.isFile && it.name == "model.int8.onnx" } &&
+            dir.walkTopDown().any { it.isFile && it.name == "tokens.txt" }
+        "tts" -> dir.walkTopDown().any { it.isFile && it.extension == "onnx" } &&
+            dir.walkTopDown().any { it.isFile && it.name == "tokens.txt" } &&
+            dir.walkTopDown().any { it.isDirectory && it.name == "espeak-ng-data" }
+        else -> false
     }
 
     private fun download(url: String, out: File, label: String, log: (String) -> Unit) {
@@ -81,7 +91,7 @@ object Models {
             var e = t.nextTarEntry
             while (e != null) {
                 val out = File(dest, e.name).canonicalFile
-                require(out.path.startsWith(destPath)) { "Tệp nén không hợp lệ" }
+                require(out.path == destPath || out.path.startsWith(destPath + File.separator)) { "Tệp nén không hợp lệ" }
                 if (e.isDirectory) out.mkdirs() else {
                     out.parentFile?.mkdirs()
                     out.outputStream().use { t.copyTo(it) }

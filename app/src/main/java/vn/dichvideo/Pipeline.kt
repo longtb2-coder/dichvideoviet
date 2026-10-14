@@ -1,6 +1,8 @@
 package vn.dichvideo
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Environment
 import com.arthenica.ffmpegkit.FFmpegKit
@@ -10,6 +12,12 @@ import com.google.mlkit.nl.translate.TranslateLanguage
 import com.google.mlkit.nl.translate.Translation
 import com.google.mlkit.nl.translate.Translator
 import com.google.mlkit.nl.translate.TranslatorOptions
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
+import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions
+import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions
 import com.k2fsa.sherpa.onnx.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.tasks.await
@@ -53,28 +61,43 @@ object Pipeline {
         if (!ReturnCode.isSuccess(s.returnCode)) error("FFmpeg lỗi: " + (s.output ?: "").takeLast(300))
     }
 
-    suspend fun run(ctx: Context, video: Uri, srt: Uri?, log: (String) -> Unit): File =
+    suspend fun run(ctx: Context, video: Uri, srt: Uri?, ocrIntervalSeconds: Double = 1.5, log: (String) -> Unit): File =
         withContext(Dispatchers.IO) {
+            require(ocrIntervalSeconds in 0.5..10.0) { "Khoảng quét chữ phải từ 0,5 đến 10 giây." }
             Models.ensure(ctx, log)
             val work = File(ctx.cacheDir, "work").apply { deleteRecursively(); mkdirs() }
             val input = File(work, "in.mp4")
-            ctx.contentResolver.openInputStream(video)!!.use { i -> input.outputStream().use { i.copyTo(it) } }
+            val source = if (video.scheme == "file") {
+                File(video.path ?: error("Đường dẫn video không hợp lệ.")).inputStream()
+            } else {
+                ctx.contentResolver.openInputStream(video) ?: error("Không mở được video đã chọn.")
+            }
+            source.use { i -> input.outputStream().use { i.copyTo(it) } }
+            require(input.length() > 1024) { "Tệp video rỗng hoặc không hợp lệ." }
 
-            val segs = if (srt != null) {
-                log("Đọc phụ đề…")
-                Srt.parse(ctx.contentResolver.openInputStream(srt)!!.bufferedReader().readText())
+            val speechSegs = if (srt != null) {
+                log("Đọc phụ đề nguồn…")
+                val text = ctx.contentResolver.openInputStream(srt)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                    ?: error("Không mở được tệp SRT.")
+                Srt.parse(text)
             } else recognize(ctx, input, work, log)
-            if (segs.isEmpty()) error("Không tìm thấy lời thoại.")
+            log("Quét chữ xuất hiện trong hình…")
+            val textSegs = recognizeText(input, ocrIntervalSeconds, log)
+            val segs = mergeNearDuplicates((speechSegs + textSegs).sortedBy { it.start })
+            if (segs.isEmpty()) error("Không tìm thấy lời thoại hoặc chữ phù hợp. Thử video rõ hơn hoặc nhập SRT.")
 
             val vi = translateAll(segs, log)
             if (vi.isEmpty()) error("Không dịch được câu nào (ngôn ngữ chưa được hỗ trợ?).")
             val clips = synthesize(ctx, vi, work, log)
 
             log("Ghép giọng Việt vào video…")
-            val outDir = ctx.getExternalFilesDir(Environment.DIRECTORY_MOVIES)!!
+            val outDir = ctx.getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: File(ctx.filesDir, "Movies")
+            outDir.mkdirs()
             val stamp = System.currentTimeMillis()
             val outVideo = File(outDir, "vi_$stamp.mp4")
-            File(outDir, "vi_$stamp.srt").writeText(Srt.write(vi))
+            val outSrt = File(outDir, "vi_$stamp.srt")
+            val subtitleFile = File(work, "translated_vi.srt").apply { writeText(Srt.write(vi), Charsets.UTF_8) }
+            subtitleFile.copyTo(outSrt, overwrite = true)
 
             val args = mutableListOf("-y", "-i", input.path)
             clips.forEach { args += listOf("-i", it.path) }
@@ -82,14 +105,106 @@ object Pipeline {
                 val ms = (vi[i].start * 1000).toLong()
                 "[${i + 1}:a]adelay=$ms|$ms[a$i]"
             }
-            val mix = if (clips.size == 1) "[a0]anull[out]"
+            val mix = if (clips.size == 1) "[a0]apad[out]"
             else clips.indices.joinToString("") { "[a$it]" } +
-                "amix=inputs=${clips.size}:normalize=0:dropout_transition=0[out]"
-            args += listOf("-filter_complex", "$delays;$mix", "-map", "0:v:0", "-map", "[out]",
-                "-c:v", "copy", "-c:a", "aac", "-shortest", outVideo.path)
+                "amix=inputs=${clips.size}:duration=longest:normalize=0:dropout_transition=0,apad[out]"
+            val escapedSubtitlePath = subtitleFile.absolutePath.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+            val subtitleFilter = "subtitles='$escapedSubtitlePath':fontsdir='/system/fonts':force_style='FontName=Noto Sans,FontSize=24,Outline=2,Shadow=1,Alignment=2,MarginV=30'"
+            args += listOf(
+                "-filter_complex", "$delays;$mix",
+                "-map", "0:v:0", "-map", "[out]",
+                "-vf", subtitleFilter,
+                "-c:v", "mpeg4", "-q:v", "3", "-pix_fmt", "yuv420p",
+                "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", "-shortest",
+                outVideo.path
+            )
             ff(*args.toTypedArray())
+            require(outVideo.exists() && outVideo.length() > 1024) { "Không tạo được MP4 đầu ra." }
+            log("Đã tạo MP4 có lồng tiếng Việt và phụ đề đốt trực tiếp vào hình.")
             outVideo
         }
+
+
+    private fun mergeNearDuplicates(input: List<Seg>): List<Seg> {
+        val out = mutableListOf<Seg>()
+        for (seg in input) {
+            val norm = seg.text.lowercase().replace(Regex("\\s+"), " ").trim()
+            val prev = out.lastOrNull()
+            val prevNorm = prev?.text?.lowercase()?.replace(Regex("\\s+"), " ")?.trim()
+            if (prev != null && norm == prevNorm && seg.start <= prev.end + 0.8 && seg.start >= prev.start) {
+                out[out.lastIndex] = prev.copy(end = maxOf(prev.end, seg.end))
+            } else out += seg
+        }
+        return out
+    }
+
+    /** OCR cục bộ theo từng mốc thời gian: Latin, Trung, Nhật và Hàn. */
+    private suspend fun recognizeText(input: File, intervalSec: Double, log: (String) -> Unit): List<Seg> {
+        val retriever = MediaMetadataRetriever()
+        val latin = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+        val chinese = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
+        val japanese = TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build())
+        val korean = TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build())
+        val result = mutableListOf<Seg>()
+        try {
+            retriever.setDataSource(input.absolutePath)
+            val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+                ?: error("Không đọc được thời lượng video để quét chữ.")
+            val stepMs = (intervalSec * 1000).toLong().coerceAtLeast(500L)
+            var timeMs = 0L
+            var lastPct = -1
+            while (timeMs < durationMs) {
+                val frame = retriever.getFrameAtTime(timeMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST)
+                if (frame != null) {
+                    var working: Bitmap = frame
+                    try {
+                        val longest = maxOf(frame.width, frame.height)
+                        if (longest > 1280) {
+                            val ratio = 1280.0 / longest
+                            working = Bitmap.createScaledBitmap(frame,
+                                (frame.width * ratio).toInt().coerceAtLeast(1),
+                                (frame.height * ratio).toInt().coerceAtLeast(1), true)
+                        }
+                        val image = InputImage.fromBitmap(working, 0)
+                        val candidates = listOf(
+                            latin.process(image).await().text,
+                            chinese.process(image).await().text,
+                            japanese.process(image).await().text,
+                            korean.process(image).await().text
+                        ).map { it.trim() }.filter { it.isNotBlank() }
+                            .distinctBy { it.lowercase().replace(Regex("\\s+"), "") }
+                        val text = candidates.joinToString(" ").trim()
+                        if (text.isNotBlank()) {
+                            val start = timeMs / 1000.0
+                            val end = minOf(durationMs / 1000.0, (timeMs + stepMs) / 1000.0).coerceAtLeast(start + 0.1)
+                            val prev = result.lastOrNull()
+                            val norm = text.lowercase().replace(Regex("\\s+"), " ").trim()
+                            val prevNorm = prev?.text?.lowercase()?.replace(Regex("\\s+"), " ")?.trim()
+                            if (prev != null && norm == prevNorm && start <= prev.end + intervalSec * 1.5) {
+                                result[result.lastIndex] = prev.copy(end = maxOf(prev.end, end))
+                            } else result += Seg(start, end, text)
+                        }
+                    } finally {
+                        if (working !== frame) working.recycle()
+                        frame.recycle()
+                    }
+                }
+                timeMs += stepMs
+                val pct = (timeMs * 100 / durationMs).toInt() / 10 * 10
+                if (pct != lastPct) {
+                    lastPct = pct
+                    log("Quét chữ trong hình… ${pct.coerceAtMost(100)}%")
+                }
+            }
+        } finally {
+            retriever.release()
+            latin.close()
+            chinese.close()
+            japanese.close()
+            korean.close()
+        }
+        return result
+    }
 
     /** Cắt câu bằng Silero VAD rồi nhận dạng từng câu bằng SenseVoice. */
     private fun recognize(ctx: Context, input: File, work: File, log: (String) -> Unit): List<Seg> {
@@ -180,6 +295,7 @@ object Pipeline {
                 if (i % 10 == 0) log("Dịch sang tiếng Việt ${i + 1}/${segs.size}…")
                 var tag = idClient.identifyLanguage(s.text).await()
                 if (tag == "und") tag = guessTag(s.text) ?: "und"
+                if (tag == "yue") tag = "zh"
                 if (tag == "vi") { out += s; return@forEachIndexed }
                 val lang = if (tag == "und") null else TranslateLanguage.fromLanguageTag(tag)
                 if (lang == null) { log("Bỏ qua 1 câu (chưa nhận diện/hỗ trợ ngôn ngữ): ${s.text.take(30)}"); return@forEachIndexed }

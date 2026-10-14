@@ -4,13 +4,13 @@ plugins {
 }
 android {
     namespace = "vn.dichvideo"
-    compileSdk = 34
+    compileSdk = 35
     defaultConfig {
         applicationId = "vn.dichvideo"
         minSdk = 24
-        targetSdk = 34
-        versionCode = 2
-        versionName = "2.0-offline"
+        targetSdk = 35
+        versionCode = 3
+        versionName = "3.0-offline"
         ndk { abiFilters += listOf("arm64-v8a") }
     }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
@@ -32,6 +32,10 @@ dependencies {
     // Dịch và nhận diện ngôn ngữ trên máy (ML Kit)
     implementation("com.google.mlkit:translate:17.0.3")
     implementation("com.google.mlkit:language-id:17.0.6")
+    implementation("com.google.mlkit:text-recognition:16.0.1")
+    implementation("com.google.mlkit:text-recognition-chinese:16.0.1")
+    implementation("com.google.mlkit:text-recognition-japanese:16.0.1")
+    implementation("com.google.mlkit:text-recognition-korean:16.0.1")
     // FFmpeg (fork còn duy trì của ffmpeg-kit)
     implementation("com.moizhassan.ffmpeg:ffmpeg-kit-16kb:6.1.1")
     // sherpa-onnx (nhận dạng giọng nói + VAD + đọc giọng): file .aar được tải vào app/libs/ khi build
