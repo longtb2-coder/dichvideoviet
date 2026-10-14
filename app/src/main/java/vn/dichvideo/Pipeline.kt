@@ -1,6 +1,9 @@
 package vn.dichvideo
 
 import android.content.Context
+import android.content.ContentValues
+import android.os.Build
+import android.provider.MediaStore
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
@@ -28,6 +31,8 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 data class Seg(val start: Double, val end: Double, val text: String)
+
+data class PipelineOutput(val videoName: String, val subtitleName: String, val location: String)
 
 object Srt {
     private val TIME = Regex("""(\d+):(\d+):(\d+)[,.](\d+)""")
@@ -61,7 +66,7 @@ object Pipeline {
         if (!ReturnCode.isSuccess(s.returnCode)) error("FFmpeg lỗi: " + (s.output ?: "").takeLast(300))
     }
 
-    suspend fun run(ctx: Context, video: Uri, srt: Uri?, ocrIntervalSeconds: Double = 1.5, log: (String) -> Unit): File =
+    suspend fun run(ctx: Context, video: Uri, srt: Uri?, ocrIntervalSeconds: Double = 1.5, log: (String) -> Unit): PipelineOutput =
         withContext(Dispatchers.IO) {
             require(ocrIntervalSeconds in 0.5..10.0) { "Khoảng quét chữ phải từ 0,5 đến 10 giây." }
             Models.ensure(ctx, log)
@@ -91,13 +96,10 @@ object Pipeline {
             val clips = synthesize(ctx, vi, work, log)
 
             log("Ghép giọng Việt vào video…")
-            val outDir = ctx.getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: File(ctx.filesDir, "Movies")
-            outDir.mkdirs()
             val stamp = System.currentTimeMillis()
-            val outVideo = File(outDir, "vi_$stamp.mp4")
-            val outSrt = File(outDir, "vi_$stamp.srt")
-            val subtitleFile = File(work, "translated_vi.srt").apply { writeText(Srt.write(vi), Charsets.UTF_8) }
-            subtitleFile.copyTo(outSrt, overwrite = true)
+            // Render vào thư mục làm việc trước, sau đó xuất ra thư mục công khai.
+            val outVideo = File(work, "vi_$stamp.mp4")
+            val subtitleFile = File(work, "vi_$stamp.srt").apply { writeText(Srt.write(vi), Charsets.UTF_8) }
 
             val args = mutableListOf("-y", "-i", input.path)
             clips.forEach { args += listOf("-i", it.path) }
@@ -119,10 +121,70 @@ object Pipeline {
                 outVideo.path
             )
             ff(*args.toTypedArray())
-            require(outVideo.exists() && outVideo.length() > 1024) { "Không tạo được MP4 đầu ra." }
+            require(outVideo.exists() && outVideo.length() > 1024) { "FFmpeg chưa tạo được MP4 đầu ra hợp lệ." }
+
+            val videoName = outVideo.name
+            val subtitleName = subtitleFile.name
+            val location: String
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                log("Đang lưu video vào thư mục Movies để có thể tìm trong Thư viện…")
+                publishToMediaStore(
+                    ctx, outVideo, videoName, "video/mp4",
+                    "${Environment.DIRECTORY_MOVIES}/VideoVietHoa",
+                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                )
+                try {
+                    publishToMediaStore(
+                        ctx, subtitleFile, subtitleName, "application/x-subrip",
+                        "${Environment.DIRECTORY_DOWNLOADS}/VideoVietHoa",
+                        MediaStore.Downloads.EXTERNAL_CONTENT_URI
+                    )
+                } catch (e: Exception) {
+                    log("Video đã lưu; chưa lưu được file SRT riêng: ${e.message ?: "lỗi không rõ"}.")
+                }
+                location = "Bộ nhớ trong/Movies/VideoVietHoa"
+                log("Đã lưu video vào Thư viện; mở ứng dụng Ảnh/Thư viện hoặc Quản lý tệp > Movies > VideoVietHoa.")
+            } else {
+                val outDir = File(ctx.getExternalFilesDir(Environment.DIRECTORY_MOVIES) ?: File(ctx.filesDir, "Movies"), "VideoVietHoa")
+                if (!outDir.exists() && !outDir.mkdirs()) error("Không tạo được thư mục đầu ra: $outDir")
+                outVideo.copyTo(File(outDir, videoName), overwrite = true)
+                subtitleFile.copyTo(File(outDir, subtitleName), overwrite = true)
+                location = outDir.absolutePath
+                log("Android phiên bản cũ: video nằm trong thư mục riêng của ứng dụng.")
+            }
             log("Đã tạo MP4 có lồng tiếng Việt và phụ đề đốt trực tiếp vào hình.")
-            outVideo
+            PipelineOutput(videoName, subtitleName, location)
         }
+
+    /** Lưu media vào thư mục công khai để người dùng nhìn thấy trong Thư viện/Quản lý tệp. */
+    private fun publishToMediaStore(
+        ctx: Context,
+        source: File,
+        displayName: String,
+        mimeType: String,
+        relativePath: String,
+        collection: Uri
+    ): Uri {
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+            put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+        val resolver = ctx.contentResolver
+        val uri = resolver.insert(collection, values) ?: error("Android không tạo được tệp đầu ra trong $relativePath.")
+        try {
+            resolver.openOutputStream(uri, "w")?.use { output ->
+                source.inputStream().use { input -> input.copyTo(output) }
+            } ?: error("Không mở được tệp đầu ra để ghi.")
+            val ready = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
+            resolver.update(uri, ready, null, null)
+            return uri
+        } catch (e: Exception) {
+            resolver.delete(uri, null, null)
+            throw e
+        }
+    }
 
 
     private fun mergeNearDuplicates(input: List<Seg>): List<Seg> {
