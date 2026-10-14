@@ -1,6 +1,7 @@
 package vn.dichvideo
 
 import android.net.Uri
+import android.content.Intent
 import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -38,6 +39,7 @@ fun Screen() {
     var videoUrl by remember { mutableStateOf("") }
     var ocrInterval by remember { mutableStateOf("1.5") }
     var log by remember { mutableStateOf("") }
+    var outputVideoUri by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val pickVideo = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
@@ -105,7 +107,8 @@ fun Screen() {
                         val out = Pipeline.run(ctx, video!!, srt, interval!!) { message ->
                             scope.launch { log += message + "\n" }
                         }
-                        log += "Xong! Video đã lưu thành công.\nThư mục: ${out.location}\nVideo: ${out.videoName}\nPhụ đề riêng: ${out.subtitleName}\nBạn có thể mở Ảnh/Thư viện hoặc Quản lý tệp để tìm video."
+                        outputVideoUri = out.videoUri
+                        log += "Xong! Video đã lưu thành công.\nThư mục: ${out.location}\nVideo: ${out.videoName}\nPhụ đề riêng: ${out.subtitleName}\nBấm nút Mở video vừa tạo để xem ngay."
                     } catch (e: Exception) {
                         log += "Lỗi: ${e.message}"
                     }
@@ -113,6 +116,22 @@ fun Screen() {
                 }
             }
         ) { Text(if (busy) "Đang xử lý…" else "Bắt đầu dịch") }
+        if (outputVideoUri != null) {
+            Button(
+                onClick = {
+                    try {
+                        val intent = Intent(Intent.ACTION_VIEW).apply {
+                            setDataAndType(Uri.parse(outputVideoUri), "video/mp4")
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        ctx.startActivity(intent)
+                    } catch (e: Exception) {
+                        log += "\\nKhông mở được video tự động: ${e.message ?: "hãy mở bằng ứng dụng Ảnh/Thư viện"}"
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("▶ Mở video vừa tạo") }
+        }
         Text(log)
     }
 }
