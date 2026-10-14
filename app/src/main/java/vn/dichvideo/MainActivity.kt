@@ -153,7 +153,6 @@ fun Screen() {
                 },
                 modifier = Modifier.fillMaxWidth()
             ) { Text("▶ Mở video vừa tạo") }
-        }
             Button(
                 enabled = !busy,
                 onClick = {
