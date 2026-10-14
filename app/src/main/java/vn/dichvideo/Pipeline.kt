@@ -66,10 +66,10 @@ object Pipeline {
         if (!ReturnCode.isSuccess(s.returnCode)) error("FFmpeg lỗi: " + (s.output ?: "").takeLast(300))
     }
 
-    suspend fun run(ctx: Context, video: Uri, srt: Uri?, ocrIntervalSeconds: Double = 1.5, log: (String) -> Unit): PipelineOutput =
+    suspend fun run(ctx: Context, video: Uri, srt: Uri?, ocrIntervalSeconds: Double = 1.5, voiceId: String = Models.DEFAULT_VOICE, log: (String) -> Unit): PipelineOutput =
         withContext(Dispatchers.IO) {
             require(ocrIntervalSeconds in 0.5..10.0) { "Khoảng quét chữ phải từ 0,5 đến 10 giây." }
-            Models.ensure(ctx, log)
+            Models.ensure(ctx, voiceId, log)
             val work = File(ctx.cacheDir, "work").apply { deleteRecursively(); mkdirs() }
             val input = File(work, "in.mp4")
             val source = if (video.scheme == "file") {
@@ -93,7 +93,7 @@ object Pipeline {
 
             val vi = translateAll(segs, log)
             if (vi.isEmpty()) error("Không dịch được câu nào (ngôn ngữ chưa được hỗ trợ?).")
-            val clips = synthesize(ctx, vi, work, log)
+            val clips = synthesize(ctx, vi, work, voiceId, log)
 
             log("Ghép giọng Việt vào video…")
             val stamp = System.currentTimeMillis()
@@ -103,6 +103,9 @@ object Pipeline {
 
             val args = mutableListOf("-y", "-i", input.path)
             clips.forEach { args += listOf("-i", it.path) }
+            // Thêm SRT như một track phụ đề MP4 dự phòng; phụ đề chính vẫn được đốt trực tiếp lên hình.
+            args += listOf("-i", subtitleFile.path)
+            val subtitleInputIndex = clips.size + 1
             val delays = clips.indices.joinToString(";") { i ->
                 val ms = (vi[i].start * 1000).toLong()
                 "[${i + 1}:a]adelay=$ms|$ms[a$i]"
@@ -114,10 +117,11 @@ object Pipeline {
             val subtitleFilter = "subtitles='$escapedSubtitlePath':fontsdir='/system/fonts':force_style='FontName=Noto Sans,FontSize=24,Outline=2,Shadow=1,Alignment=2,MarginV=30'"
             args += listOf(
                 "-filter_complex", "$delays;$mix",
-                "-map", "0:v:0", "-map", "[out]",
+                "-map", "0:v:0", "-map", "[out]", "-map", "$subtitleInputIndex:s:0",
                 "-vf", subtitleFilter,
                 "-c:v", "mpeg4", "-q:v", "3", "-pix_fmt", "yuv420p",
-                "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", "-shortest",
+                "-c:a", "aac", "-b:a", "128k", "-c:s", "mov_text", "-metadata:s:s:0", "language=vie",
+                "-movflags", "+faststart", "-shortest",
                 outVideo.path
             )
             ff(*args.toTypedArray())
@@ -378,12 +382,12 @@ object Pipeline {
     }
 
     /** Đọc từng câu tiếng Việt, tăng tốc nếu dài hơn khoảng thời gian cho phép. */
-    private fun synthesize(ctx: Context, segs: List<Seg>, work: File, log: (String) -> Unit): List<File> {
+    private fun synthesize(ctx: Context, segs: List<Seg>, work: File, voiceId: String, log: (String) -> Unit): List<File> {
         val tts = OfflineTts(config = OfflineTtsConfig(
             model = OfflineTtsModelConfig(
                 vits = OfflineTtsVitsModelConfig(
-                    model = Models.ttsModel(ctx).path, tokens = Models.ttsTokens(ctx).path,
-                    dataDir = Models.ttsData(ctx).path),
+                    model = Models.ttsModel(ctx, voiceId).path, tokens = Models.ttsTokens(ctx, voiceId).path,
+                    dataDir = Models.ttsData(ctx, voiceId).path),
                 numThreads = 2, debug = false, provider = "cpu")))
         try {
             return segs.mapIndexed { i, s ->
