@@ -32,3 +32,7 @@ Công nghệ
 
 Phát hành
 Bản này là bản phát triển. Chỉ phát hành APK cho người dùng sau khi CI build và kiểm thử đầu-cuối trên thiết bị thật. Không được hiểu “biên dịch thành công” là “mọi chức năng đã được xác nhận chạy”.
+
+
+MỞ VIDEO SAU KHI XỬ LÝ
+Sau khi xử lý xong, bấm nút “Mở video vừa tạo” ngay trong ứng dụng để mở MP4 đầu ra. Trên Android 10 trở lên, video được xuất vào Bộ nhớ trong/Movies/VideoVietHoa; phụ đề SRT nằm trong Download/VideoVietHoa. Cần cài APK từ bản build mới nhất để có nút mở video trực tiếp.
