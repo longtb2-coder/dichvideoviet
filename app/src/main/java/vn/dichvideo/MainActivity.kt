@@ -128,7 +128,7 @@ fun Screen() {
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("🎬 Video đầu vào", style = MaterialTheme.typography.titleMedium)
-        Button(enabled = !busy, onClick = { pickVideo.launch(arrayOf("video/*")) })
+        Button(enabled = !busy, onClick = { pickVideo.launch(arrayOf("video/*")) }) {
             Text(if (video == null) "① Chọn video trong điện thoại" else "Đã chọn video ✓")
         }
         OutlinedTextField(
