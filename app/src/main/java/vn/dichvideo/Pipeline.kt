@@ -597,11 +597,18 @@ object Pipeline {
                             .build()
                     )
                 }
-                try {
-                    if (downloadedLanguages.add(lang)) {
+                if (downloadedLanguages.add(lang)) {
+                    try {
                         log("Chuẩn bị mô hình dịch ${lang} → tiếng Việt (chỉ cần tải lần đầu)…")
                         translator.downloadModelIfNeeded().await()
+                    } catch (e: Exception) {
+                        downloadedLanguages.remove(lang)
+                        throw IllegalStateException(
+                            "Không tải được mô hình dịch ${lang}. Hãy kết nối mạng, thử lại rồi mới dùng ngoại tuyến.", e
+                        )
                     }
+                }
+                try {
                     val translated = translator.translate(s.text).await().trim()
                     if (translated.isNotBlank()) out += s.copy(text = translated)
                     else {
@@ -609,8 +616,7 @@ object Pipeline {
                         out += s
                     }
                 } catch (e: Exception) {
-                    downloadedLanguages.remove(lang)
-                    log("Dịch câu ${i + 1} thất bại (${e.message ?: "lỗi mô hình/mạng"}); giữ nguyên câu nguồn.")
+                    log("Dịch câu ${i + 1} thất bại (${e.message ?: "lỗi xử lý văn bản"}); giữ nguyên câu nguồn.")
                     out += s
                 }
             }
