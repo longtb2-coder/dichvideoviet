@@ -43,14 +43,19 @@ object Models {
         fetchArchive(ttsDir(ctx, voiceId), voiceArchive(voiceId), "giọng đọc tiếng Việt ($voiceId)", log)
     }
 
-    fun ensure(ctx: Context, voiceId: String = DEFAULT_VOICE, log: (String) -> Unit) {
+    /** Chỉ tải mô hình cần để phân tích video; không tải TTS nếu người dùng chưa tạo giọng. */
+    fun ensureAnalysis(ctx: Context, log: (String) -> Unit) {
         val base = root(ctx)
         fetchArchive(File(base, "sense"), SENSE_URL, "mô hình nhận dạng (khoảng 230 MB)", log)
-        ensureVoice(ctx, voiceId, log)
         if (!vad(ctx).exists()) {
             vad(ctx).parentFile!!.mkdirs()
             download(VAD_URL, vad(ctx), "bộ cắt câu", log)
         }
+    }
+
+    fun ensure(ctx: Context, voiceId: String = DEFAULT_VOICE, log: (String) -> Unit) {
+        ensureAnalysis(ctx, log)
+        ensureVoice(ctx, voiceId, log)
     }
 
     private fun fetchArchive(dir: File, url: String, label: String, log: (String) -> Unit) {
