@@ -57,6 +57,7 @@ fun Screen() {
     var originalVolume by remember { mutableStateOf(0f) }
     var translatedVolume by remember { mutableStateOf(100f) }
     var coverOriginalText by remember { mutableStateOf(true) }
+    var textRemovalMode by remember { mutableStateOf("blur") }
     var coverHeightPercent by remember { mutableStateOf(8f) }
     var coverTopPercent by remember { mutableStateOf(31f) }
     var previewFrame by remember { mutableStateOf<Bitmap?>(null) }
@@ -280,11 +281,33 @@ fun Screen() {
                     Text("Che vùng phía dưới video trước khi thêm phụ đề Việt")
                 }
                 if (coverOriginalText) {
-                    Text("Vị trí chữ gốc (tính từ trên xuống): ${coverTopPercent.toInt()}%")
+                    Text("Cách xử lý chữ gốc", style = MaterialTheme.typography.titleSmall)
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        RadioButton(selected = textRemovalMode == "blur", onClick = { textRemovalMode = "blur" })
+                        Column(Modifier.weight(1f)) {
+                            Text("Làm mờ vùng chữ")
+                            Text("Che chữ bằng vùng nền đã làm mờ; thường tự nhiên hơn dải đen.", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        RadioButton(selected = textRemovalMode == "remove", onClick = { textRemovalMode = "remove" })
+                        Column(Modifier.weight(1f)) {
+                            Text("Xóa chữ / phục hồi nền thử nghiệm")
+                            Text("Dùng bộ lọc delogo để nội suy nền; có thể để lại vệt nếu nền phức tạp.", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        RadioButton(selected = textRemovalMode == "cover", onClick = { textRemovalMode = "cover" })
+                        Column(Modifier.weight(1f)) {
+                            Text("Che bằng dải đen")
+                            Text("Ổn định nhất nhưng dễ nhìn thấy vùng che.", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                    Text("Vị trí vùng chữ (tính từ trên xuống): ${coverTopPercent.toInt()}%")
                     Slider(value = coverTopPercent, onValueChange = { coverTopPercent = it }, valueRange = 20f..65f, steps = 44)
-                    Text("Chiều cao vùng xoá: ${coverHeightPercent.toInt()}%")
+                    Text("Chiều cao vùng xử lý: ${coverHeightPercent.toInt()}%")
                     Slider(value = coverHeightPercent, onValueChange = { coverHeightPercent = it }, valueRange = 6f..18f, steps = 11)
-                    Text("Mặc định đặt vùng che gần vị trí phụ đề trong clip mẫu. Vùng che là dải đen gọn; chỉnh vị trí lên/xuống và chiều cao cho khớp chữ gốc.", style = MaterialTheme.typography.bodySmall)
+                    Text("Mẹo: căn vùng vừa đủ bao quanh phụ đề Trung. Xóa nền tự nhiên hoàn toàn cần mô hình inpainting chuyên dụng và có thể nặng với điện thoại.", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -313,6 +336,7 @@ fun Screen() {
                             originalVolume = originalVolume / 100f,
                             translatedVolume = translatedVolume / 100f,
                             coverOriginalText = coverOriginalText,
+                            textRemovalMode = textRemovalMode,
                             coverHeightPercent = coverHeightPercent,
                             coverTopPercent = coverTopPercent
                         ) { message ->
