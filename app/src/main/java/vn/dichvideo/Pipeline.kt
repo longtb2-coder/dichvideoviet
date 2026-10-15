@@ -74,6 +74,7 @@ object Pipeline {
         coverOriginalText: Boolean = false,
         coverHeightPercent: Float = 8f,
         coverTopPercent: Float = 31f,
+        textRemovalMode: String = "blur",
         log: (String) -> Unit
     ): PipelineOutput =
         withContext(Dispatchers.IO) {
@@ -151,18 +152,31 @@ object Pipeline {
             }
             val escapedSubtitlePath = subtitleFile.absolutePath.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
             val subtitleTextFilter = "subtitles='" + escapedSubtitlePath + "':fontsdir='/system/fonts':force_style='FontName=Noto Sans,FontSize=24,Outline=2,Shadow=1,Alignment=2,MarginV=30'"
-            val coverFilter = if (coverOriginalText) {
-                val h = coverHeightPercent.coerceIn(6f, 24f) / 100f
-                val top = coverTopPercent.coerceIn(20f, 82f) / 100f
-                val x = (videoWidth * 0.08f).toInt().coerceAtLeast(1)
-                val y = (videoHeight * top).toInt().coerceAtLeast(1)
-                val w = (videoWidth * 0.84f).toInt().coerceAtMost(videoWidth - x - 1)
-                val hh = (videoHeight * h).toInt().coerceAtLeast(2).coerceAtMost(videoHeight - y - 1)
-                "drawbox=x=" + x + ":y=" + y + ":w=" + w + ":h=" + hh + ":color=black@1:t=fill," + subtitleTextFilter
-            } else subtitleTextFilter
-            args += listOf("-map", "0:v:0", "-vf", coverFilter)
-            if (filters.isNotEmpty()) args += listOf("-filter_complex", filters.joinToString(";"), "-map", "[out]")
-            else if (hasAudio) args += listOf("-map", "0:a:0", "-af", "volume=" + originalVolume)
+            val regionH = coverHeightPercent.coerceIn(6f, 24f) / 100f
+            val regionTop = coverTopPercent.coerceIn(20f, 82f) / 100f
+            val regionX = (videoWidth * 0.08f).toInt().coerceAtLeast(0)
+            val regionY = (videoHeight * regionTop).toInt().coerceAtLeast(0)
+            val regionW = (videoWidth * 0.84f).toInt().coerceAtMost(videoWidth - regionX).coerceAtLeast(2)
+            val regionPixelH = (videoHeight * regionH).toInt().coerceAtLeast(2).coerceAtMost(videoHeight - regionY)
+            val blurVideoGraph = if (coverOriginalText && textRemovalMode == "blur") {
+                "[0:v]split=2[base][tmp];[tmp]crop=$regionW:$regionPixelH:$regionX:$regionY,boxblur=12:2[blurred];[base][blurred]overlay=$regionX:$regionY,$subtitleTextFilter[vout]"
+            } else null
+            val coverFilter = if (!coverOriginalText) subtitleTextFilter else when (textRemovalMode) {
+                "remove" -> "delogo=x=$regionX:y=$regionY:w=$regionW:h=$regionPixelH:show=0,$subtitleTextFilter"
+                "cover" -> "drawbox=x=$regionX:y=$regionY:w=$regionW:h=$regionPixelH:color=black@1:t=fill,$subtitleTextFilter"
+                else -> subtitleTextFilter
+            }
+            if (blurVideoGraph != null) {
+                filters.add(blurVideoGraph)
+                args += listOf("-map", "[vout]")
+            } else {
+                args += listOf("-map", "0:v:0", "-vf", coverFilter)
+            }
+            if (filters.isNotEmpty()) {
+                args += listOf("-filter_complex", filters.joinToString(";"))
+                if (clips.isNotEmpty()) args += listOf("-map", "[out]")
+            }
+            if (clips.isEmpty() && hasAudio) args += listOf("-map", "0:a:0", "-af", "volume=" + originalVolume)
             args += listOf("-map", subtitleInputIndex.toString() + ":s:0", "-c:v", "mpeg4", "-q:v", "3", "-pix_fmt", "yuv420p", "-c:s", "mov_text", "-metadata:s:s:0", "language=vie", "-movflags", "+faststart", "-t", "%.3f".format(java.util.Locale.US, videoDurationSeconds), outVideo.path)
             ff(*args.toTypedArray())
             require(outVideo.exists() && outVideo.length() > 1024) { "FFmpeg chưa tạo được MP4 đầu ra hợp lệ." }
