@@ -16,12 +16,18 @@ object Models {
     const val VAD_URL = ASR + "silero_vad.onnx"
     const val DEFAULT_VOICE = "vais1000"
 
-    private fun voiceArchive(voiceId: String): String = TTS + when (voiceId) {
+    fun modelVoiceId(voiceId: String): String =
+        if (voiceId.startsWith("vivos_")) "vivos" else voiceId
+
+    fun speakerId(voiceId: String): Int =
+        if (voiceId.startsWith("vivos_")) voiceId.substringAfter("vivos_").toIntOrNull()?.coerceIn(0, 64) ?: 0 else 0
+
+    private fun voiceArchive(voiceId: String): String = TTS + when (modelVoiceId(voiceId)) {
         "25hours_single" -> "vits-piper-vi_VN-25hours_single-low.tar.bz2"
         "vivos" -> "vits-piper-vi_VN-vivos-x_low.tar.bz2"
         else -> "vits-piper-vi_VN-vais1000-medium.tar.bz2"
     }
-    private fun ttsDir(ctx: Context, voiceId: String) = File(root(ctx), "tts-$voiceId")
+    private fun ttsDir(ctx: Context, voiceId: String) = File(root(ctx), "tts-${modelVoiceId(voiceId)}")
 
     private val http = OkHttpClient.Builder().readTimeout(60, TimeUnit.SECONDS).build()
 
@@ -33,10 +39,14 @@ object Models {
     fun ttsTokens(ctx: Context, voiceId: String = DEFAULT_VOICE) = ttsDir(ctx, voiceId).walkTopDown().first { it.name == "tokens.txt" }
     fun ttsData(ctx: Context, voiceId: String = DEFAULT_VOICE) = ttsDir(ctx, voiceId).walkTopDown().first { it.isDirectory && it.name == "espeak-ng-data" }
 
+    fun ensureVoice(ctx: Context, voiceId: String = DEFAULT_VOICE, log: (String) -> Unit) {
+        fetchArchive(ttsDir(ctx, voiceId), voiceArchive(voiceId), "giọng đọc tiếng Việt ($voiceId)", log)
+    }
+
     fun ensure(ctx: Context, voiceId: String = DEFAULT_VOICE, log: (String) -> Unit) {
         val base = root(ctx)
         fetchArchive(File(base, "sense"), SENSE_URL, "mô hình nhận dạng (khoảng 230 MB)", log)
-        fetchArchive(ttsDir(ctx, voiceId), voiceArchive(voiceId), "giọng đọc tiếng Việt ($voiceId)", log)
+        ensureVoice(ctx, voiceId, log)
         if (!vad(ctx).exists()) {
             vad(ctx).parentFile!!.mkdirs()
             download(VAD_URL, vad(ctx), "bộ cắt câu", log)
