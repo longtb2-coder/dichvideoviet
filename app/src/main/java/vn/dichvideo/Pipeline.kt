@@ -72,8 +72,8 @@ object Pipeline {
         originalVolume: Float = 0f,
         translatedVolume: Float = 1f,
         coverOriginalText: Boolean = false,
-        coverHeightPercent: Float = 12f,
-        coverTopPercent: Float = 52f,
+        coverHeightPercent: Float = 8f,
+        coverTopPercent: Float = 31f,
         log: (String) -> Unit
     ): PipelineOutput =
         withContext(Dispatchers.IO) {
@@ -154,12 +154,12 @@ object Pipeline {
             val coverFilter = if (coverOriginalText) {
                 val h = (coverHeightPercent.coerceIn(6f, 24f) / 100f)
                 val top = (coverTopPercent.coerceIn(35f, 82f) / 100f)
-                // delogo cần toạ độ pixel nguyên; chừa lề nhỏ để vùng xoá nằm hẳn trong khung hình.
+                // Dùng dải che gọn, ổn định trên nhiều bản FFmpeg; delogo tạo vệt nhòe lớn với phụ đề ngang.
                 val x = (videoWidth * 0.08f).toInt().coerceAtLeast(1)
                 val y = (videoHeight * top).toInt().coerceAtLeast(1)
                 val w = (videoWidth * 0.84f).toInt().coerceAtMost(videoWidth - x - 1)
                 val hh = (videoHeight * h).toInt().coerceAtLeast(2).coerceAtMost(videoHeight - y - 1)
-                "delogo=x=$x:y=$y:w=$w:h=$hh:show=0,$subtitleTextFilter"
+                "drawbox=x=$x:y=$y:w=$w:h=$hh:color=black@1:t=fill,$subtitleTextFilter"
             } else subtitleTextFilter
             args += listOf(
                 "-filter_complex", "$delays;$voiceMix;$audioMix",
