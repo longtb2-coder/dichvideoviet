@@ -64,6 +64,72 @@ object Srt {
 object Pipeline {
     private const val SR = 16000
 
+    /**
+     * Extract speech and on-screen text as source material for product-review rewriting.
+     * This does not translate or rewrite the facts; the review editor handles that separately.
+     */
+    suspend fun extractReviewSource(
+        ctx: Context,
+        video: Uri,
+        srt: Uri?,
+        ocrIntervalSeconds: Double = 1.5,
+        log: (String) -> Unit
+    ): String = withContext(Dispatchers.IO) {
+        require(ocrIntervalSeconds in 0.5..10.0) { "Khoảng quét chữ phải từ 0,5 đến 10 giây." }
+        Models.ensureAnalysis(ctx, log)
+        val work = File(ctx.cacheDir, "review-analysis").apply { deleteRecursively(); mkdirs() }
+        val input = File(work, "source-video.mp4")
+        val source = if (video.scheme == "file") {
+            File(video.path ?: error("Đường dẫn video không hợp lệ.")).inputStream()
+        } else {
+            ctx.contentResolver.openInputStream(video) ?: error("Không mở được video đã chọn.")
+        }
+        source.use { from -> input.outputStream().use { to -> from.copyTo(to) } }
+        require(input.length() > 1024) { "Video nguồn rỗng hoặc không hợp lệ." }
+
+        val speech = if (srt != null) {
+            log("Đọc phụ đề SRT làm nguồn nội dung…")
+            val text = ctx.contentResolver.openInputStream(srt)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                ?: error("Không mở được tệp SRT.")
+            Srt.parse(text)
+        } else if (probeHasAudio(input)) {
+            try { recognize(ctx, input, work, log) }
+            catch (e: Exception) {
+                log("Nhận dạng lời nói thất bại: ${e.message ?: "lỗi không rõ"}")
+                emptyList()
+            }
+        } else emptyList()
+
+        log("Đang đọc chữ xuất hiện trên video…")
+        val onScreen = try { recognizeText(input, ocrIntervalSeconds, log) }
+            catch (e: Exception) {
+                log("Không đọc được chữ trên hình: ${e.message ?: "lỗi không rõ"}")
+                emptyList()
+            }
+        val result = buildString {
+            if (speech.isNotEmpty()) {
+                appendLine("LỜI THOẠI / PHỤ ĐỀ NGUỒN:")
+                speech.sortedBy { it.start }.forEach { seg ->
+                    append("[${"%.1f".format(java.util.Locale.US, seg.start)}s] ")
+                    appendLine(seg.text)
+                }
+            }
+            if (onScreen.isNotEmpty()) {
+                appendLine()
+                appendLine("CHỮ NHẬN DẠNG TRÊN HÌNH:")
+                onScreen.sortedBy { it.start }.forEach { seg ->
+                    append("[${"%.1f".format(java.util.Locale.US, seg.start)}s] ")
+                    appendLine(seg.text)
+                }
+            }
+        }.trim().take(12000)
+        require(result.isNotBlank()) {
+            "Chưa nhận dạng được lời thoại hoặc chữ trên hình. Thử chọn file SRT hoặc kiểm tra chất lượng video."
+        }
+        log("Đã lấy nội dung nguồn. Hãy rà lại thông tin trước khi tạo kịch bản review.")
+        result
+    }
+
     suspend fun createVoicePreview(
         ctx: Context, voiceId: String, voiceStyleId: String, text: String,
         log: (String) -> Unit
