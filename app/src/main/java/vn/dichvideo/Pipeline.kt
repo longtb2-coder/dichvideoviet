@@ -103,7 +103,12 @@ object Pipeline {
                 log("Ưu tiên lời thoại theo thời gian âm thanh; không trộn chữ OCR để tránh đọc lặp.")
                 speechSegs
             } else textSegs
-            val segs = mergeNearbySpeech(mergeNearDuplicates(selectedSegs.sortedBy { it.start }))
+            val segs = if (speechSegs.isNotEmpty()) {
+                mergeNearbySpeech(mergeNearDuplicates(speechSegs.sortedBy { it.start }))
+            } else {
+                // OCR có mốc lấy mẫu cố định; không gộp qua nhiều câu chữ khác nhau.
+                mergeNearDuplicates(textSegs.sortedBy { it.start })
+            }
             if (segs.isEmpty()) error("Không tìm thấy lời thoại hoặc chữ phù hợp. Thử video rõ hơn hoặc nhập SRT.")
 
             val vi = translateAll(segs, log)
