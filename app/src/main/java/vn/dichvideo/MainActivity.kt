@@ -362,6 +362,9 @@ fun Screen() {
                     "story" -> "Kể chuyện chậm, ấm"
                     "sales" -> "Bán hàng năng lượng"
                     "natural" -> "Tự nhiên, cân bằng"
+                    "news" -> "Bản tin, chuyên gia"
+                    "asmr" -> "Nhẹ nhàng, thư giãn"
+                    "fast" -> "Nhanh gọn, dứt khoát"
                     else -> "Review ngắn kiểu TikTok"
                 })
             }
@@ -371,6 +374,9 @@ fun Screen() {
                 DropdownMenuItem(text = { Text("Kể chuyện chậm, ấm") }, onClick = { voiceStyleId = "story"; voiceStyleMenuExpanded = false })
                 DropdownMenuItem(text = { Text("Bán hàng năng lượng") }, onClick = { voiceStyleId = "sales"; voiceStyleMenuExpanded = false })
                 DropdownMenuItem(text = { Text("Tự nhiên, cân bằng") }, onClick = { voiceStyleId = "natural"; voiceStyleMenuExpanded = false })
+                DropdownMenuItem(text = { Text("Bản tin, chuyên gia") }, onClick = { voiceStyleId = "news"; voiceStyleMenuExpanded = false })
+                DropdownMenuItem(text = { Text("Nhẹ nhàng, thư giãn") }, onClick = { voiceStyleId = "asmr"; voiceStyleMenuExpanded = false })
+                DropdownMenuItem(text = { Text("Nhanh gọn, dứt khoát") }, onClick = { voiceStyleId = "fast"; voiceStyleMenuExpanded = false })
             }
         }
         OutlinedTextField(
@@ -436,7 +442,7 @@ fun Screen() {
                 previewing = false
             }, modifier = Modifier.fillMaxWidth()) { Text("■ Dừng nghe thử") }
         }
-        Text("Phong cách hiện điều chỉnh tốc độ đọc; các lựa chọn VIVOS dùng nhiều speaker trong cùng một mô hình, chưa được gán nhãn nam/nữ đã xác minh. Không sao chép giọng người nổi tiếng. Lưu ý: giấy phép mô hình 25hours chưa rõ; VIVOS có điều kiện phi thương mại, nên kiểm tra giấy phép trước khi dùng video kiếm tiền.", style = MaterialTheme.typography.bodySmall)
+        Text("Các phong cách mới điều chỉnh nhịp đọc, không phải giọng người thật mới. VIVOS có 5 speaker trong cùng mô hình; chưa gán nhãn nam/nữ vì chưa xác minh. Không sao chép giọng người nổi tiếng. Lưu ý: kiểm tra giấy phép 25hours và điều kiện phi thương mại của VIVOS trước khi dùng video kiếm tiền.", style = MaterialTheme.typography.bodySmall)
             }
         }
         Card(modifier = Modifier.fillMaxWidth()) {
