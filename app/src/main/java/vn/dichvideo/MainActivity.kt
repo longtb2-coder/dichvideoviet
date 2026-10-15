@@ -54,6 +54,8 @@ fun Screen() {
     var ocrInterval by remember { mutableStateOf("1.5") }
     var voiceId by remember { mutableStateOf("vais1000") }
     var voiceMenuExpanded by remember { mutableStateOf(false) }
+    var voiceStyleId by remember { mutableStateOf("review") }
+    var voiceStyleMenuExpanded by remember { mutableStateOf(false) }
     var originalVolume by remember { mutableStateOf(0f) }
     var translatedVolume by remember { mutableStateOf(100f) }
     var coverOriginalText by remember { mutableStateOf(true) }
@@ -156,7 +158,26 @@ fun Screen() {
                 )
             }
         }
-        Text("Các giọng này chạy trên máy sau khi tải mô hình; đây không phải bản sao giọng TikTok độc quyền.", style = MaterialTheme.typography.bodySmall)
+        Text("Chọn phong cách đọc", style = MaterialTheme.typography.titleSmall)
+        Box {
+            OutlinedButton(onClick = { voiceStyleMenuExpanded = true }, enabled = !busy) {
+                Text(when (voiceStyleId) {
+                    "narration" -> "Thuyết minh rõ ràng"
+                    "story" -> "Kể chuyện chậm, ấm"
+                    "sales" -> "Bán hàng năng lượng"
+                    "natural" -> "Tự nhiên, cân bằng"
+                    else -> "Review ngắn kiểu TikTok"
+                })
+            }
+            DropdownMenu(expanded = voiceStyleMenuExpanded, onDismissRequest = { voiceStyleMenuExpanded = false }) {
+                DropdownMenuItem(text = { Text("Review ngắn kiểu TikTok") }, onClick = { voiceStyleId = "review"; voiceStyleMenuExpanded = false })
+                DropdownMenuItem(text = { Text("Thuyết minh rõ ràng") }, onClick = { voiceStyleId = "narration"; voiceStyleMenuExpanded = false })
+                DropdownMenuItem(text = { Text("Kể chuyện chậm, ấm") }, onClick = { voiceStyleId = "story"; voiceStyleMenuExpanded = false })
+                DropdownMenuItem(text = { Text("Bán hàng năng lượng") }, onClick = { voiceStyleId = "sales"; voiceStyleMenuExpanded = false })
+                DropdownMenuItem(text = { Text("Tự nhiên, cân bằng") }, onClick = { voiceStyleId = "natural"; voiceStyleMenuExpanded = false })
+            }
+        }
+        Text("Phong cách điều chỉnh nhịp đọc; chất giọng nam/nữ phụ thuộc mô hình đã chọn. Đây không phải bản sao giọng của người nổi tiếng.", style = MaterialTheme.typography.bodySmall)
             }
         }
         Card(modifier = Modifier.fillMaxWidth()) {
@@ -341,6 +362,7 @@ fun Screen() {
                         require(interval != null && interval in 0.5..10.0) { "Khoảng quét phải từ 0,5 đến 10 giây." }
                         val out = Pipeline.run(
                             ctx, video!!, srt, interval!!, voiceId,
+                            voiceStyleId = voiceStyleId,
                             originalVolume = originalVolume / 100f,
                             translatedVolume = translatedVolume / 100f,
                             coverOriginalText = coverOriginalText,
