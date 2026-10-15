@@ -17,6 +17,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
+import android.media.MediaPlayer
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
@@ -56,6 +57,9 @@ fun Screen() {
     var voiceMenuExpanded by remember { mutableStateOf(false) }
     var voiceStyleId by remember { mutableStateOf("review") }
     var voiceStyleMenuExpanded by remember { mutableStateOf(false) }
+    var previewText by remember { mutableStateOf("Món này dùng khá tiện, nhỏ gọn mà làm việc rất nhanh. Nếu bạn đang cần một lựa chọn đơn giản thì có thể tham khảo nhé.") }
+    var previewing by remember { mutableStateOf(false) }
+    var previewPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
     var originalVolume by remember { mutableStateOf(0f) }
     var translatedVolume by remember { mutableStateOf(100f) }
     var coverOriginalText by remember { mutableStateOf(true) }
@@ -67,7 +71,8 @@ fun Screen() {
     var detectingRegion by remember { mutableStateOf(false) }
     val voiceLabel = when (voiceId) {
         "25hours_single" -> "Nam trầm — 25hours"
-        "vivos" -> "Nữ nhẹ — VIVOS"
+        "vivos" -> "VIVOS — giọng 1"
+        in listOf("vivos_1", "vivos_2", "vivos_3", "vivos_4") -> "VIVOS — giọng ${voiceId.substringAfter('_').toInt() + 1}"
         else -> "Nữ tự nhiên — VAIS1000"
     }
     var log by remember { mutableStateOf("") }
@@ -153,8 +158,24 @@ fun Screen() {
                     onClick = { voiceId = "25hours_single"; voiceMenuExpanded = false }
                 )
                 DropdownMenuItem(
-                    text = { Text("Nữ nhẹ — VIVOS") },
+                    text = { Text("VIVOS — giọng 1") },
                     onClick = { voiceId = "vivos"; voiceMenuExpanded = false }
+                )
+                DropdownMenuItem(
+                    text = { Text("VIVOS — giọng 2") },
+                    onClick = { voiceId = "vivos_1"; voiceMenuExpanded = false }
+                )
+                DropdownMenuItem(
+                    text = { Text("VIVOS — giọng 3") },
+                    onClick = { voiceId = "vivos_2"; voiceMenuExpanded = false }
+                )
+                DropdownMenuItem(
+                    text = { Text("VIVOS — giọng 4") },
+                    onClick = { voiceId = "vivos_3"; voiceMenuExpanded = false }
+                )
+                DropdownMenuItem(
+                    text = { Text("VIVOS — giọng 5") },
+                    onClick = { voiceId = "vivos_4"; voiceMenuExpanded = false }
                 )
             }
         }
@@ -177,7 +198,58 @@ fun Screen() {
                 DropdownMenuItem(text = { Text("Tự nhiên, cân bằng") }, onClick = { voiceStyleId = "natural"; voiceStyleMenuExpanded = false })
             }
         }
-        Text("Phong cách điều chỉnh nhịp đọc; không sao chép giọng người nổi tiếng. Lưu ý: giấy phép mô hình 25hours chưa rõ; VIVOS có điều kiện phi thương mại, nên kiểm tra giấy phép trước khi dùng video kiếm tiền.", style = MaterialTheme.typography.bodySmall)
+        OutlinedTextField(
+            value = previewText,
+            onValueChange = { previewText = it },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Câu dùng để nghe thử giọng") },
+            minLines = 2,
+            maxLines = 4
+        )
+        Button(
+            enabled = !busy && previewText.isNotBlank(),
+            modifier = Modifier.fillMaxWidth(),
+            onClick = {
+                scope.launch {
+                    busy = true
+                    previewing = false
+                    log = "Đang chuẩn bị nghe thử giọng…\n"
+                    try {
+                        val sampleFile = Pipeline.createVoicePreview(ctx, voiceId, voiceStyleId, previewText) { message ->
+                            scope.launch { log += message + "\n" }
+                        }
+                        previewPlayer?.let { old ->
+                            try { old.stop() } catch (_: Exception) {}
+                            try { old.release() } catch (_: Exception) {}
+                        }
+                        previewPlayer = MediaPlayer().apply {
+                            setDataSource(sampleFile.absolutePath)
+                            setOnPreparedListener { player ->
+                                player.start()
+                                previewing = true
+                                log += "Đang phát mẫu giọng.\n"
+                            }
+                            setOnCompletionListener { player ->
+                                player.release()
+                                if (previewPlayer === player) previewPlayer = null
+                                previewing = false
+                            }
+                            setOnErrorListener { player, _, _ ->
+                                player.release()
+                                if (previewPlayer === player) previewPlayer = null
+                                previewing = false
+                                log += "Không phát được mẫu âm thanh.\n"
+                                true
+                            }
+                            prepareAsync()
+                        }
+                    } catch (e: Exception) {
+                        log += "Nghe thử thất bại: ${e.message ?: "lỗi không rõ"}\n"
+                    } finally { busy = false }
+                }
+            }
+        ) { Text(if (previewing) "▶ Đang nghe thử…" else "▶ Nghe thử giọng đã chọn") }
+        Text("Phong cách hiện điều chỉnh tốc độ đọc; các lựa chọn VIVOS dùng nhiều speaker trong cùng một mô hình, chưa được gán nhãn nam/nữ đã xác minh. Không sao chép giọng người nổi tiếng. Lưu ý: giấy phép mô hình 25hours chưa rõ; VIVOS có điều kiện phi thương mại, nên kiểm tra giấy phép trước khi dùng video kiếm tiền.", style = MaterialTheme.typography.bodySmall)
             }
         }
         Card(modifier = Modifier.fillMaxWidth()) {
