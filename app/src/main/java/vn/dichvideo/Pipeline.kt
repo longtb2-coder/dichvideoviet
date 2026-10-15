@@ -139,9 +139,10 @@ object Pipeline {
         Models.ensureVoice(ctx, voiceId, log)
         val speed = when (voiceStyleId) {
             "narration" -> 0.96f
-            "story" -> 0.90f
+            "story", "asmr" -> 0.90f
             "sales" -> 1.04f
-            "natural" -> 1.0f
+            "natural", "news" -> 1.0f
+            "fast" -> 1.12f
             else -> 1.08f
         }
         val tts = OfflineTts(config = OfflineTtsConfig(
@@ -777,9 +778,10 @@ object Pipeline {
         // Presets change delivery speed on-device; they do not imitate a specific real person.
         val speechSpeed = when (voiceStyleId) {
             "narration" -> 0.96f
-            "story" -> 0.90f
+            "story", "asmr" -> 0.90f
             "sales" -> 1.04f
-            "natural" -> 1.0f
+            "natural", "news" -> 1.0f
+            "fast" -> 1.12f
             else -> 1.08f
         }
         log("Phong cách giọng đọc: " + when (voiceStyleId) {
@@ -787,6 +789,9 @@ object Pipeline {
             "story" -> "kể chuyện chậm, ấm"
             "sales" -> "bán hàng năng lượng"
             "natural" -> "tự nhiên, cân bằng"
+            "news" -> "bản tin, chuyên gia"
+            "asmr" -> "nhẹ nhàng, thư giãn"
+            "fast" -> "nhanh gọn, dứt khoát"
             else -> "review ngắn kiểu TikTok"
         })
         val tts = OfflineTts(config = OfflineTtsConfig(
