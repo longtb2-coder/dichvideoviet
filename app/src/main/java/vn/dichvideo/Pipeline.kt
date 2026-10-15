@@ -72,7 +72,8 @@ object Pipeline {
         originalVolume: Float = 0f,
         translatedVolume: Float = 1f,
         coverOriginalText: Boolean = false,
-        coverHeightPercent: Float = 18f,
+        coverHeightPercent: Float = 12f,
+        coverTopPercent: Float = 52f,
         log: (String) -> Unit
     ): PipelineOutput =
         withContext(Dispatchers.IO) {
@@ -96,7 +97,13 @@ object Pipeline {
             } else recognize(ctx, input, work, log)
             log("Quét chữ xuất hiện trong hình…")
             val textSegs = recognizeText(input, ocrIntervalSeconds, log)
-            val segs = mergeNearDuplicates((speechSegs + textSegs).sortedBy { it.start })
+            // Khi có lời nói, dùng mốc thời gian của lời nói để tránh đọc lặp phụ đề OCR và lời thoại.
+            // Chỉ dùng OCR làm nguồn dự phòng khi không nhận dạng được lời nói.
+            val selectedSegs = if (speechSegs.isNotEmpty()) {
+                log("Ưu tiên lời thoại theo thời gian âm thanh; không trộn chữ OCR để tránh đọc lặp.")
+                speechSegs
+            } else textSegs
+            val segs = mergeNearbySpeech(mergeNearDuplicates(selectedSegs.sortedBy { it.start }))
             if (segs.isEmpty()) error("Không tìm thấy lời thoại hoặc chữ phù hợp. Thử video rõ hơn hoặc nhập SRT.")
 
             val vi = translateAll(segs, log)
@@ -134,8 +141,10 @@ object Pipeline {
             val escapedSubtitlePath = subtitleFile.absolutePath.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
             val subtitleTextFilter = "subtitles='$escapedSubtitlePath':fontsdir='/system/fonts':force_style='FontName=Noto Sans,FontSize=24,Outline=2,Shadow=1,Alignment=2,MarginV=30'"
             val coverFilter = if (coverOriginalText) {
-                val h = (coverHeightPercent.coerceIn(8f, 30f) / 100f)
-                "drawbox=x=0:y=ih*(1-$h):w=iw:h=ih*$h:color=black@1:t=fill,$subtitleTextFilter"
+                val h = (coverHeightPercent.coerceIn(6f, 24f) / 100f)
+                val top = (coverTopPercent.coerceIn(35f, 82f) / 100f)
+                // Xoá mềm vùng phụ đề nguồn thay vì phủ một dải đen khó nhìn.
+                "delogo=x=0:y=ih*$top:w=iw:h=ih*$h:show=0,$subtitleTextFilter"
             } else subtitleTextFilter
             args += listOf(
                 "-filter_complex", "$delays;$voiceMix;$audioMix",
@@ -215,6 +224,18 @@ object Pipeline {
         }
     }
 
+
+    private fun mergeNearbySpeech(input: List<Seg>): List<Seg> {
+        if (input.size < 2) return input
+        val out = mutableListOf<Seg>()
+        for (seg in input) {
+            val prev = out.lastOrNull()
+            if (prev != null && seg.start >= prev.start && seg.start - prev.end <= 0.45 && seg.start - prev.start <= 7.0) {
+                out[out.lastIndex] = prev.copy(end = maxOf(prev.end, seg.end), text = (prev.text.trimEnd() + " " + seg.text.trimStart()).trim())
+            } else out += seg
+        }
+        return out
+    }
 
     private fun mergeNearDuplicates(input: List<Seg>): List<Seg> {
         val out = mutableListOf<Seg>()
@@ -416,17 +437,15 @@ object Pipeline {
                 if (i % 5 == 0) log("Tạo giọng đọc ${i + 1}/${segs.size}…")
                 // Câu được phép đọc kéo dài đến khi câu kế tiếp bắt đầu.
                 val window = maxOf(s.end - s.start, (segs.getOrNull(i + 1)?.start ?: s.end) - s.start)
-                var a = tts.generate(s.text, 0, 1.0f)
-                var dur = a.samples.size.toDouble() / a.sampleRate
-                if (window > 0 && dur > window) {
-                    a = tts.generate(s.text, 0, minOf(dur / window * 1.02, 1.5).toFloat())
-                    dur = a.samples.size.toDouble() / a.sampleRate
-                }
+                val a = tts.generate(s.text, 0, 1.0f)
+                val dur = a.samples.size.toDouble() / a.sampleRate
                 val f = File(work, "t_$i.wav")
                 writeWav(f, a.samples, a.sampleRate)
-                if (window > 0 && dur > window) {
+                if (window > 0 && dur > window * 1.02) {
+                    // Chỉ tăng tốc một lần, tránh vừa tăng tốc TTS vừa tăng tốc FFmpeg gây giọng líu và quá nhanh.
                     val o = File(work, "f_$i.wav")
-                    ff("-y", "-i", f.path, "-filter:a", "atempo=${minOf(dur / window, 2.0)}", o.path)
+                    val tempo = minOf(dur / window, 1.35)
+                    ff("-y", "-i", f.path, "-filter:a", "atempo=$tempo", o.path)
                     o
                 } else f
             }
