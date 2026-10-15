@@ -89,38 +89,34 @@ object Pipeline {
             source.use { i -> input.outputStream().use { i.copyTo(it) } }
             require(input.length() > 1024) { "Tệp video rỗng hoặc không hợp lệ." }
 
+            val hasAudio = probeHasAudio(input)
             val speechSegs = if (srt != null) {
                 log("Đọc phụ đề nguồn…")
                 val text = ctx.contentResolver.openInputStream(srt)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
                     ?: error("Không mở được tệp SRT.")
                 Srt.parse(text)
-            } else recognize(ctx, input, work, log)
-            log("Quét chữ xuất hiện trong hình…")
-            val textSegs = recognizeText(input, ocrIntervalSeconds, log)
-            // Khi có lời nói, dùng mốc thời gian của lời nói để tránh đọc lặp phụ đề OCR và lời thoại.
-            // Chỉ dùng OCR làm nguồn dự phòng khi không nhận dạng được lời nói.
-            val selectedSegs = if (speechSegs.isNotEmpty()) {
-                log("Ưu tiên lời thoại theo thời gian âm thanh; không trộn chữ OCR để tránh đọc lặp.")
-                speechSegs
-            } else textSegs
-            val segs = if (speechSegs.isNotEmpty()) {
-                mergeNearbySpeech(mergeNearDuplicates(speechSegs.sortedBy { it.start }))
+            } else if (hasAudio) {
+                try { recognize(ctx, input, work, log) }
+                catch (e: Exception) { log("Không nhận dạng được lời nói; sẽ tiếp tục quét chữ trong hình."); emptyList() }
             } else {
-                // OCR có mốc lấy mẫu cố định; không gộp qua nhiều câu chữ khác nhau.
-                mergeNearDuplicates(textSegs.sortedBy { it.start })
+                log("Video không có âm thanh; chuyển sang dịch chữ trong hình.")
+                emptyList()
             }
-            if (segs.isEmpty()) error("Không tìm thấy lời thoại hoặc chữ phù hợp. Thử video rõ hơn hoặc nhập SRT.")
-
-            val vi = translateAll(segs, log)
-            if (vi.isEmpty()) error("Không dịch được câu nào (ngôn ngữ chưa được hỗ trợ?).")
-            val clips = synthesize(ctx, vi, work, voiceId, log)
-
-            log("Ghép giọng Việt vào video…")
+            log("Quét chữ/phụ đề trong hình…")
+            val textSegs = try { recognizeText(input, ocrIntervalSeconds, log) }
+                catch (e: Exception) { log("Không quét được chữ trong hình; tiếp tục với lời thoại nếu có."); emptyList() }
+            val speechVi = if (speechSegs.isNotEmpty()) translateAll(mergeNearbySpeech(mergeNearDuplicates(speechSegs.sortedBy { it.start })), log) else emptyList()
+            val textVi = if (textSegs.isNotEmpty()) translateAll(mergeNearDuplicates(textSegs.sortedBy { it.start }), log) else emptyList()
+            if (speechVi.isEmpty() && textVi.isEmpty()) error("Không tìm thấy lời nói hoặc chữ có thể dịch. Thử video rõ hơn hoặc chọn file SRT.")
+            if (speechVi.isNotEmpty()) log("Lời nói được dịch riêng để tạo giọng Việt.")
+            if (textVi.isNotEmpty()) log("Chữ trên hình được dịch riêng thành phụ đề; không dùng OCR để tạo giọng đọc.")
+            val vi = if (textVi.isNotEmpty()) textVi else speechVi
+            val voiceSegs = speechVi
+            val clips = if (voiceSegs.isNotEmpty()) synthesize(ctx, voiceSegs, work, voiceId, log) else emptyList()
+            log("Ghép giọng Việt và phụ đề…")
             val stamp = System.currentTimeMillis()
-            // Render vào thư mục làm việc trước, sau đó xuất ra thư mục công khai.
-            val outVideo = File(work, "vi_$stamp.mp4")
-            val subtitleFile = File(work, "vi_$stamp.srt").apply { writeText(Srt.write(vi), Charsets.UTF_8) }
-
+            val outVideo = File(work, "vi_" + stamp + ".mp4")
+            val subtitleFile = File(work, "vi_" + stamp + ".srt").apply { writeText(Srt.write(vi), Charsets.UTF_8) }
             val metadata = MediaMetadataRetriever()
             val videoInfo = try {
                 metadata.setDataSource(input.absolutePath)
@@ -138,38 +134,36 @@ object Pipeline {
 
             val args = mutableListOf("-y", "-i", input.path)
             clips.forEach { args += listOf("-i", it.path) }
-            // Thêm SRT như một track phụ đề MP4 dự phòng; phụ đề chính vẫn được đốt trực tiếp lên hình.
             args += listOf("-i", subtitleFile.path)
             val subtitleInputIndex = clips.size + 1
-            val delays = clips.indices.joinToString(";") { i ->
-                val ms = (vi[i].start * 1000).toLong()
-                "[${i + 1}:a]adelay=$ms|$ms[a$i]"
+            val filters = mutableListOf<String>()
+            if (clips.isNotEmpty()) {
+                val delays = clips.indices.joinToString(";") { i ->
+                    val ms = (voiceSegs[i].start * 1000).toLong()
+                    "[" + (i + 1) + ":a]adelay=" + ms + "|" + ms + "[a" + i + "]"
+                }
+                val voiceMix = if (clips.size == 1) "[a0]volume=" + translatedVolume + ",apad[voice]"
+                else clips.indices.joinToString("") { "[a" + it + "]" } + "amix=inputs=" + clips.size + ":duration=longest:normalize=0:dropout_transition=0,volume=" + translatedVolume + ",apad[voice]"
+                filters += delays
+                filters += voiceMix
+                if (hasAudio) filters += "[0:a]volume=" + originalVolume + "[original];[original][voice]amix=inputs=2:duration=longest:normalize=0,apad[out]"
+                else filters += "[voice]anull[out]"
             }
-            val voiceMix = if (clips.size == 1) "[a0]volume=$translatedVolume,apad[voice]"
-            else clips.indices.joinToString("") { "[a$it]" } +
-                "amix=inputs=${clips.size}:duration=longest:normalize=0:dropout_transition=0,volume=$translatedVolume,apad[voice]"
-            val audioMix = "[0:a]volume=$originalVolume[original];[original][voice]amix=inputs=2:duration=longest:normalize=0,apad[out]"
             val escapedSubtitlePath = subtitleFile.absolutePath.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
-            val subtitleTextFilter = "subtitles='$escapedSubtitlePath':fontsdir='/system/fonts':force_style='FontName=Noto Sans,FontSize=24,Outline=2,Shadow=1,Alignment=2,MarginV=30'"
+            val subtitleTextFilter = "subtitles='" + escapedSubtitlePath + "':fontsdir='/system/fonts':force_style='FontName=Noto Sans,FontSize=24,Outline=2,Shadow=1,Alignment=2,MarginV=30'"
             val coverFilter = if (coverOriginalText) {
-                val h = (coverHeightPercent.coerceIn(6f, 24f) / 100f)
-                val top = (coverTopPercent.coerceIn(35f, 82f) / 100f)
-                // Dùng dải che gọn, ổn định trên nhiều bản FFmpeg; delogo tạo vệt nhòe lớn với phụ đề ngang.
+                val h = coverHeightPercent.coerceIn(6f, 24f) / 100f
+                val top = coverTopPercent.coerceIn(20f, 82f) / 100f
                 val x = (videoWidth * 0.08f).toInt().coerceAtLeast(1)
                 val y = (videoHeight * top).toInt().coerceAtLeast(1)
                 val w = (videoWidth * 0.84f).toInt().coerceAtMost(videoWidth - x - 1)
                 val hh = (videoHeight * h).toInt().coerceAtLeast(2).coerceAtMost(videoHeight - y - 1)
-                "drawbox=x=$x:y=$y:w=$w:h=$hh:color=black@1:t=fill,$subtitleTextFilter"
+                "drawbox=x=" + x + ":y=" + y + ":w=" + w + ":h=" + hh + ":color=black@1:t=fill," + subtitleTextFilter
             } else subtitleTextFilter
-            args += listOf(
-                "-filter_complex", "$delays;$voiceMix;$audioMix",
-                "-map", "0:v:0", "-map", "[out]", "-map", "$subtitleInputIndex:s:0",
-                "-vf", coverFilter,
-                "-c:v", "mpeg4", "-q:v", "3", "-pix_fmt", "yuv420p",
-                "-c:a", "aac", "-b:a", "128k", "-c:s", "mov_text", "-metadata:s:s:0", "language=vie",
-                "-movflags", "+faststart", "-t", "%.3f".format(java.util.Locale.US, videoDurationSeconds),
-                outVideo.path
-            )
+            args += listOf("-map", "0:v:0", "-vf", coverFilter)
+            if (filters.isNotEmpty()) args += listOf("-filter_complex", filters.joinToString(";"), "-map", "[out]")
+            else if (hasAudio) args += listOf("-map", "0:a:0", "-af", "volume=" + originalVolume)
+            args += listOf("-map", subtitleInputIndex.toString() + ":s:0", "-c:v", "mpeg4", "-q:v", "3", "-pix_fmt", "yuv420p", "-c:s", "mov_text", "-metadata:s:s:0", "language=vie", "-movflags", "+faststart", "-t", "%.3f".format(java.util.Locale.US, videoDurationSeconds), outVideo.path)
             ff(*args.toTypedArray())
             require(outVideo.exists() && outVideo.length() > 1024) { "FFmpeg chưa tạo được MP4 đầu ra hợp lệ." }
 
@@ -240,6 +234,12 @@ object Pipeline {
     }
 
 
+    private fun probeHasAudio(input: File): Boolean {
+        return try {
+            val session = FFmpegKit.executeWithArguments(arrayOf("-i", input.absolutePath))
+            Regex("(?i)Audio:").containsMatchIn(session.output ?: "")
+        } catch (_: Exception) { false }
+    }
     private fun mergeNearbySpeech(input: List<Seg>): List<Seg> {
         if (input.size < 2) return input
         val out = mutableListOf<Seg>()
