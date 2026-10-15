@@ -34,6 +34,9 @@ data class Seg(val start: Double, val end: Double, val text: String)
 
 data class PipelineOutput(val videoName: String, val subtitleName: String, val location: String, val videoUri: String)
 
+private data class DetectedTextRegion(val start: Double, val end: Double, val x: Int, val y: Int, val w: Int, val h: Int)
+private data class TextBoxSample(val time: Double, val rect: android.graphics.Rect)
+
 object Srt {
     private val TIME = Regex("""(\d+):(\d+):(\d+)[,.](\d+)""")
     private fun sec(s: String): Double {
@@ -75,6 +78,7 @@ object Pipeline {
         coverHeightPercent: Float = 8f,
         coverTopPercent: Float = 31f,
         textRemovalMode: String = "blur",
+        autoDetectTextRegions: Boolean = true,
         log: (String) -> Unit
     ): PipelineOutput =
         withContext(Dispatchers.IO) {
@@ -132,6 +136,16 @@ object Pipeline {
             val videoWidth = videoInfo.second
             val videoHeight = videoInfo.third
             require(videoDurationSeconds > 0.0 && videoWidth > 0 && videoHeight > 0) { "Không đọc được thời lượng/kích thước video đầu vào." }
+            val detectedRegions = if (coverOriginalText && autoDetectTextRegions) {
+                try {
+                    log("Đang tự dò vị trí chữ Trung trên nhiều khung hình…")
+                    detectChineseTextRegions(input, videoDurationSeconds, videoWidth, videoHeight, minOf(1.0, ocrIntervalSeconds).coerceAtLeast(0.5), log)
+                        .also { log(if (it.isEmpty()) "Chưa tìm thấy vùng chữ Trung ổn định; sẽ dùng vùng căn tay." else "Đã tìm được ${it.size} vùng chữ theo thời gian.") }
+                } catch (e: Exception) {
+                    log("Tự dò vị trí chữ gặp lỗi; chuyển về vùng căn tay: ${e.message ?: "không rõ lỗi"}")
+                    emptyList()
+                }
+            } else emptyList()
 
             val args = mutableListOf("-y", "-i", input.path)
             clips.forEach { args += listOf("-i", it.path) }
@@ -158,18 +172,53 @@ object Pipeline {
             val regionY = (videoHeight * regionTop).toInt().coerceAtLeast(0)
             val regionW = (videoWidth * 0.84f).toInt().coerceAtMost(videoWidth - regionX).coerceAtLeast(2)
             val regionPixelH = (videoHeight * regionH).toInt().coerceAtLeast(2).coerceAtMost(videoHeight - regionY)
-            val blurVideoGraph = if (coverOriginalText && textRemovalMode == "blur") {
-                "[0:v]split=2[base][tmp];[tmp]crop=$regionW:$regionPixelH:$regionX:$regionY,boxblur=12:2[blurred];[base][blurred]overlay=$regionX:$regionY,$subtitleTextFilter[vout]"
-            } else null
-            val coverFilter = if (!coverOriginalText) subtitleTextFilter else when (textRemovalMode) {
-                "remove" -> "delogo=x=$regionX:y=$regionY:w=$regionW:h=$regionPixelH:show=0,$subtitleTextFilter"
-                "cover" -> "drawbox=x=$regionX:y=$regionY:w=$regionW:h=$regionPixelH:color=black@1:t=fill,$subtitleTextFilter"
-                else -> subtitleTextFilter
+            val escapedSubtitlePath = subtitleFile.absolutePath.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+            val subtitleFilterForGraph = "subtitles='" + escapedSubtitlePath + "':fontsdir='/system/fonts':force_style='FontName=Noto Sans,FontSize=24,Outline=2,Shadow=1,Alignment=2,MarginV=30'"
+            var videoGraphUsed = false
+            if (coverOriginalText && detectedRegions.isNotEmpty()) {
+                var currentLabel = "0:v"
+                detectedRegions.forEachIndexed { i, r ->
+                    val start = r.start.coerceAtLeast(0.0)
+                    val end = r.end.coerceAtMost(videoDurationSeconds)
+                    if (end > start && r.w >= 2 && r.h >= 2) {
+                        val enable = "between(t\\,$start\\,$end)"
+                        when (textRemovalMode) {
+                            "blur" -> {
+                                filters += "[$currentLabel]split=2[base$i][crop$i]"
+                                filters += "[crop$i]crop=${r.w}:${r.h}:${r.x}:${r.y},boxblur=12:2[blur$i]"
+                                filters += "[base$i][blur$i]overlay=${r.x}:${r.y}:enable='$enable'[v$i]"
+                                currentLabel = "v$i"
+                            }
+                            "remove" -> {
+                                filters += "[$currentLabel]delogo=x=${r.x}:y=${r.y}:w=${r.w}:h=${r.h}:show=0:enable='$enable'[v$i]"
+                                currentLabel = "v$i"
+                            }
+                            else -> {
+                                filters += "[$currentLabel]drawbox=x=${r.x}:y=${r.y}:w=${r.w}:h=${r.h}:color=black@1:t=fill:enable='$enable'[v$i]"
+                                currentLabel = "v$i"
+                            }
+                        }
+                    }
+                }
+                if (currentLabel != "0:v") {
+                    filters += "[$currentLabel]$subtitleFilterForGraph[vout]"
+                    args += listOf("-map", "[vout]")
+                    videoGraphUsed = true
+                }
             }
-            if (blurVideoGraph != null) {
-                filters.add(blurVideoGraph)
+            if (!videoGraphUsed && coverOriginalText && textRemovalMode == "blur") {
+                filters += "[0:v]split=2[base][tmp]"
+                filters += "[tmp]crop=$regionW:$regionPixelH:$regionX:$regionY,boxblur=12:2[blurred]"
+                filters += "[base][blurred]overlay=$regionX:$regionY,$subtitleFilterForGraph[vout]"
                 args += listOf("-map", "[vout]")
-            } else {
+                videoGraphUsed = true
+            }
+            if (!videoGraphUsed) {
+                val coverFilter = if (!coverOriginalText) subtitleTextFilter else when (textRemovalMode) {
+                    "remove" -> "delogo=x=$regionX:y=$regionY:w=$regionW:h=$regionPixelH:show=0,$subtitleTextFilter"
+                    "cover" -> "drawbox=x=$regionX:y=$regionY:w=$regionW:h=$regionPixelH:color=black@1:t=fill,$subtitleTextFilter"
+                    else -> subtitleTextFilter
+                }
                 args += listOf("-map", "0:v:0", "-vf", coverFilter)
             }
             if (filters.isNotEmpty()) {
@@ -280,6 +329,91 @@ object Pipeline {
     }
 
     /** OCR cục bộ theo từng mốc thời gian: Latin, Trung, Nhật và Hàn. */
+    /**
+     * Scan sampled frames for Chinese glyphs and build spatial tracks.
+     * Returned coordinates use the original video dimensions.
+     */
+    private suspend fun detectChineseTextRegions(
+        input: File, durationSec: Double, frameWidth: Int, frameHeight: Int,
+        intervalSec: Double, log: (String) -> Unit
+    ): List<DetectedTextRegion> {
+        val retriever = MediaMetadataRetriever()
+        val recognizer = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
+        val tracks = mutableListOf<MutableList<TextBoxSample>>()
+        try {
+            retriever.setDataSource(input.absolutePath)
+            var t = 0.0
+            var scanned = 0
+            while (t < durationSec) {
+                val frame = retriever.getFrameAtTime((t * 1_000_000).toLong(), MediaMetadataRetriever.OPTION_CLOSEST)
+                if (frame != null) {
+                    try {
+                        val maxSide = maxOf(frame.width, frame.height)
+                        val scale = if (maxSide > 960) 960.0 / maxSide else 1.0
+                        val working = if (scale < 1.0) Bitmap.createScaledBitmap(
+                            frame, (frame.width * scale).toInt().coerceAtLeast(1),
+                            (frame.height * scale).toInt().coerceAtLeast(1), true
+                        ) else frame
+                        try {
+                            val result = recognizer.process(InputImage.fromBitmap(working, 0)).await()
+                            val sx = frameWidth.toFloat() / working.width
+                            val sy = frameHeight.toFloat() / working.height
+                            val boxes = result.textBlocks.filter { block ->
+                                block.text.any { it.code in 0x4E00..0x9FFF }
+                            }.flatMap { it.lines }.mapNotNull { line ->
+                                val b = line.boundingBox ?: return@mapNotNull null
+                                val left = (b.left * sx).toInt()
+                                val top = (b.top * sy).toInt()
+                                val right = (b.right * sx).toInt()
+                                val bottom = (b.bottom * sy).toInt()
+                                if (right - left < frameWidth * 0.015 || bottom - top < frameHeight * 0.008) null
+                                else android.graphics.Rect(left, top, right, bottom)
+                            }.filter { it.left >= 0 && it.top >= 0 && it.right <= frameWidth && it.bottom <= frameHeight }
+                            boxes.forEach { box ->
+                                val cx = box.centerX().toFloat()
+                                val cy = box.centerY().toFloat()
+                                val track = tracks.filter { tr ->
+                                    val last = tr.last()
+                                    t - last.time <= intervalSec * 2.2 &&
+                                        kotlin.math.abs(last.rect.centerX() - cx) < frameWidth * 0.24f &&
+                                        kotlin.math.abs(last.rect.centerY() - cy) < frameHeight * 0.075f
+                                }.minByOrNull { tr ->
+                                    val last = tr.last().rect
+                                    kotlin.math.abs(last.centerX() - cx) / frameWidth +
+                                        kotlin.math.abs(last.centerY() - cy) / frameHeight
+                                }
+                                if (track != null) track += TextBoxSample(t, android.graphics.Rect(box))
+                                else if (tracks.size < 24) tracks += mutableListOf(TextBoxSample(t, android.graphics.Rect(box)))
+                            }
+                        } finally {
+                            if (working !== frame) working.recycle()
+                        }
+                    } finally { frame.recycle() }
+                }
+                t += intervalSec
+                scanned++
+                if (scanned % 5 == 0) log("Tìm vùng chữ… ${(t / durationSec * 100).toInt().coerceAtMost(100)}%")
+            }
+        } finally {
+            retriever.release()
+            recognizer.close()
+        }
+        return tracks.mapNotNull { track ->
+            if (track.isEmpty()) return@mapNotNull null
+            val all = track.map { it.rect }
+            val padX = (all.maxOf { it.width() } * 0.12f).toInt().coerceAtLeast(4)
+            val padY = (all.maxOf { it.height() } * 0.22f).toInt().coerceAtLeast(3)
+            val left = (all.minOf { it.left } - padX).coerceAtLeast(0)
+            val top = (all.minOf { it.top } - padY).coerceAtLeast(0)
+            val right = (all.maxOf { it.right } + padX).coerceAtMost(frameWidth - 1)
+            val bottom = (all.maxOf { it.bottom } + padY).coerceAtMost(frameHeight - 1)
+            val start = track.minOf { it.time }
+            val end = (track.maxOf { it.time } + intervalSec).coerceAtMost(durationSec)
+            if (right <= left || bottom <= top || end <= start) null
+            else DetectedTextRegion(start, end, left, top, right - left, bottom - top)
+        }.sortedBy { it.start }.take(24)
+    }
+
     private suspend fun recognizeText(input: File, intervalSec: Double, log: (String) -> Unit): List<Seg> {
         val retriever = MediaMetadataRetriever()
         val latin = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
