@@ -122,13 +122,19 @@ object Pipeline {
             val subtitleFile = File(work, "vi_$stamp.srt").apply { writeText(Srt.write(vi), Charsets.UTF_8) }
 
             val metadata = MediaMetadataRetriever()
-            val videoDurationSeconds = try {
+            val videoInfo = try {
                 metadata.setDataSource(input.absolutePath)
-                (metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toDoubleOrNull() ?: 0.0) / 1000.0
+                val duration = (metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toDoubleOrNull() ?: 0.0) / 1000.0
+                val width = metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+                val height = metadata.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+                Triple(duration, width, height)
             } finally {
                 metadata.release()
             }
-            require(videoDurationSeconds > 0.0) { "Không đọc được thời lượng video đầu vào." }
+            val videoDurationSeconds = videoInfo.first
+            val videoWidth = videoInfo.second
+            val videoHeight = videoInfo.third
+            require(videoDurationSeconds > 0.0 && videoWidth > 0 && videoHeight > 0) { "Không đọc được thời lượng/kích thước video đầu vào." }
 
             val args = mutableListOf("-y", "-i", input.path)
             clips.forEach { args += listOf("-i", it.path) }
@@ -148,8 +154,12 @@ object Pipeline {
             val coverFilter = if (coverOriginalText) {
                 val h = (coverHeightPercent.coerceIn(6f, 24f) / 100f)
                 val top = (coverTopPercent.coerceIn(35f, 82f) / 100f)
-                // Xoá mềm vùng phụ đề nguồn thay vì phủ một dải đen khó nhìn.
-                "delogo=x=0:y=ih*$top:w=iw:h=ih*$h:show=0,$subtitleTextFilter"
+                // delogo cần toạ độ pixel nguyên; chừa lề nhỏ để vùng xoá nằm hẳn trong khung hình.
+                val x = (videoWidth * 0.08f).toInt().coerceAtLeast(1)
+                val y = (videoHeight * top).toInt().coerceAtLeast(1)
+                val w = (videoWidth * 0.84f).toInt().coerceAtMost(videoWidth - x - 1)
+                val hh = (videoHeight * h).toInt().coerceAtLeast(2).coerceAtMost(videoHeight - y - 1)
+                "delogo=x=$x:y=$y:w=$w:h=$hh:show=0,$subtitleTextFilter"
             } else subtitleTextFilter
             args += listOf(
                 "-filter_complex", "$delays;$voiceMix;$audioMix",
