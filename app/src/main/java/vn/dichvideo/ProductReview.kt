@@ -33,7 +33,6 @@ object ProductReviewEngine {
         val facts = request.sourceFacts
             .replace(Regex("(?i)(https?://\\S+|www\\.\\S+)"), " ")
             .replace(Regex("[\\t ]+"), " ")
-            .replace(Regex("\\n{3,}"), "\\n\\n")
             .trim()
         val points = facts.split(Regex("[\\n.!?。；;]+"))
             .map { it.trim().trim(',', ':', '-', '•', ' ') }
