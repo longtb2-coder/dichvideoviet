@@ -64,6 +64,38 @@ object Srt {
 object Pipeline {
     private const val SR = 16000
 
+    suspend fun createVoicePreview(
+        ctx: Context, voiceId: String, voiceStyleId: String, text: String,
+        log: (String) -> Unit
+    ): File = withContext(Dispatchers.IO) {
+        val sample = text.trim().take(500)
+        require(sample.isNotBlank()) { "Nhập một câu ngắn để nghe thử giọng." }
+        Models.ensureVoice(ctx, voiceId, log)
+        val speed = when (voiceStyleId) {
+            "narration" -> 0.96f
+            "story" -> 0.90f
+            "sales" -> 1.04f
+            "natural" -> 1.0f
+            else -> 1.08f
+        }
+        val tts = OfflineTts(config = OfflineTtsConfig(
+            model = OfflineTtsModelConfig(
+                vits = OfflineTtsVitsModelConfig(
+                    model = Models.ttsModel(ctx, voiceId).path,
+                    tokens = Models.ttsTokens(ctx, voiceId).path,
+                    dataDir = Models.ttsData(ctx, voiceId).path),
+                numThreads = 2, debug = false, provider = "cpu")))
+        try {
+            log("Đang tạo mẫu giọng đọc…")
+            val audio = tts.generate(sample, Models.speakerId(voiceId), speed)
+            val file = File(ctx.cacheDir, "voice-preview.wav")
+            writeWav(file, audio.samples, audio.sampleRate)
+            file
+        } finally {
+            tts.release()
+        }
+    }
+
     private fun ff(vararg a: String) {
         val s = FFmpegKit.executeWithArguments(arrayOf(*a))
         if (!ReturnCode.isSuccess(s.returnCode)) error("FFmpeg lỗi: " + (s.output ?: "").takeLast(300))
@@ -168,13 +200,21 @@ object Pipeline {
                 else filters += "[voice]anull[out]"
             }
             val escapedSubtitlePath = subtitleFile.absolutePath.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
-            val subtitleTextFilter = "subtitles='" + escapedSubtitlePath + "':fontsdir='/system/fonts':force_style='FontName=Noto Sans,FontSize=24,Outline=2,Shadow=1,Alignment=2,MarginV=30'"
             val regionH = coverHeightPercent.coerceIn(6f, 24f) / 100f
             val regionTop = coverTopPercent.coerceIn(20f, 82f) / 100f
             val regionX = (videoWidth * 0.08f).toInt().coerceAtLeast(0)
             val regionY = (videoHeight * regionTop).toInt().coerceAtLeast(0)
             val regionW = (videoWidth * 0.84f).toInt().coerceAtMost(videoWidth - regionX).coerceAtLeast(2)
             val regionPixelH = (videoHeight * regionH).toInt().coerceAtLeast(2).coerceAtMost(videoHeight - regionY)
+            // Place translated subtitles in the old subtitle band where possible.
+            val detectedCenterY = detectedRegions.takeIf { it.isNotEmpty() }
+                ?.map { it.y + it.h / 2 }?.average()?.toInt()
+            val subtitleCenterY = if (coverOriginalText) detectedCenterY ?: (regionY + regionPixelH / 2)
+                else videoHeight - (videoHeight * 0.08f).toInt()
+            val subtitleMarginV = if (coverOriginalText)
+                (videoHeight - subtitleCenterY).coerceIn(24, (videoHeight - 24).coerceAtLeast(24))
+            else 30
+            val subtitleTextFilter = "subtitles='" + escapedSubtitlePath + "':fontsdir='/system/fonts':force_style='FontName=Noto Sans,FontSize=24,Outline=2,Shadow=1,BorderStyle=3,BackColour=&H80000000,Alignment=2,MarginV=$subtitleMarginV'"
             val subtitleFilterForGraph = subtitleTextFilter
             var videoGraphUsed = false
             if (coverOriginalText && detectedRegions.isNotEmpty()) {
@@ -657,7 +697,7 @@ object Pipeline {
                 if (i % 5 == 0) log("Tạo giọng đọc ${i + 1}/${segs.size}…")
                 // Câu được phép đọc kéo dài đến khi câu kế tiếp bắt đầu.
                 val window = maxOf(s.end - s.start, (segs.getOrNull(i + 1)?.start ?: s.end) - s.start)
-                val a = tts.generate(s.text, 0, speechSpeed)
+                val a = tts.generate(s.text, Models.speakerId(voiceId), speechSpeed)
                 val dur = a.samples.size.toDouble() / a.sampleRate
                 val f = File(work, "t_$i.wav")
                 writeWav(f, a.samples, a.sampleRate)
