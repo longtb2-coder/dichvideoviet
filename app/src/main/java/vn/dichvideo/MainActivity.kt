@@ -90,6 +90,7 @@ fun Screen() {
     var reviewSelectedIndex by remember { mutableIntStateOf(0) }
     var reviewScript by remember { mutableStateOf("") }
     var reviewBusy by remember { mutableStateOf(false) }
+    var useReviewNarration by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val pickVideo = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
         if (it != null) {
@@ -290,6 +291,13 @@ fun Screen() {
                         minLines = 4,
                         maxLines = 10
                     )
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Checkbox(checked = useReviewNarration, onCheckedChange = { useReviewNarration = it })
+                        Column(Modifier.weight(1f)) {
+                            Text("Dùng kịch bản này làm lời thuyết minh video")
+                            Text("Khi bật, lời thoại gốc sẽ không được dịch để đọc; kịch bản review sẽ thay thế. Chữ trên hình vẫn được xử lý riêng.", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
                     Button(
                         onClick = { previewText = reviewScript; log = "Đã chuyển kịch bản sang ô nghe thử giọng. Hãy chọn giọng và bấm Nghe thử." },
                         modifier = Modifier.fillMaxWidth()
@@ -609,7 +617,8 @@ fun Screen() {
                             textRemovalMode = textRemovalMode,
                             autoDetectTextRegions = autoDetectTextRegions,
                             coverHeightPercent = coverHeightPercent,
-                            coverTopPercent = coverTopPercent
+                            coverTopPercent = coverTopPercent,
+                            reviewNarration = if (useReviewNarration) reviewScript else null
                         ) { message ->
                             scope.launch { log += message + "\n" }
                         }
