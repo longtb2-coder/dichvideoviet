@@ -226,7 +226,10 @@ object Pipeline {
                 else translateAll(mergeNearbySpeech(mergeNearDuplicates(speechSegs.sortedBy { it.start })), log)
             val textVi = if (textSegs.isNotEmpty()) translateAll(mergeNearDuplicates(textSegs.sortedBy { it.start }), log) else emptyList()
             if (speechVi.isEmpty() && textVi.isEmpty()) error("Không tìm thấy lời nói hoặc chữ có thể dịch. Thử video rõ hơn hoặc chọn file SRT.")
-            if (speechVi.isNotEmpty()) log("Lời nói được dịch riêng để tạo giọng Việt.")
+            if (speechVi.isNotEmpty()) {
+                if (useReviewVoice) log("Kịch bản review được dùng làm lời thuyết minh; thời điểm phụ đề được ước lượng theo độ dài câu.")
+                else log("Lời nói được dịch riêng để tạo giọng Việt.")
+            }
             if (textVi.isNotEmpty()) log("Chữ trên hình được dịch riêng thành phụ đề; không dùng OCR để tạo giọng đọc.")
             // Keep translated dialogue and translated on-screen text in subtitles.
             // The Vietnamese voice remains based on speech only, so OCR text is never read aloud.
