@@ -66,9 +66,9 @@ fun Screen() {
     var previewFrame by remember { mutableStateOf<Bitmap?>(null) }
     var detectingRegion by remember { mutableStateOf(false) }
     val voiceLabel = when (voiceId) {
-        "25hours_single" -> "Giọng 2 — 25hours (trầm hơn)"
-        "vivos" -> "Giọng 3 — VIVOS (nhẹ hơn)"
-        else -> "Giọng 1 — VAIS1000 (tự nhiên)"
+        "25hours_single" -> "Nam trầm — 25hours"
+        "vivos" -> "Nữ nhẹ — VIVOS"
+        else -> "Nữ tự nhiên — VAIS1000"
     }
     var log by remember { mutableStateOf("") }
     var outputVideoUri by remember { mutableStateOf<String?>(null) }
@@ -145,15 +145,15 @@ fun Screen() {
             }
             DropdownMenu(expanded = voiceMenuExpanded, onDismissRequest = { voiceMenuExpanded = false }) {
                 DropdownMenuItem(
-                    text = { Text("Giọng 1 — VAIS1000 (tự nhiên, mặc định)") },
+                    text = { Text("Nữ tự nhiên — VAIS1000 (mặc định)") },
                     onClick = { voiceId = "vais1000"; voiceMenuExpanded = false }
                 )
                 DropdownMenuItem(
-                    text = { Text("Giọng 2 — 25hours (trầm hơn)") },
+                    text = { Text("Nam trầm — 25hours") },
                     onClick = { voiceId = "25hours_single"; voiceMenuExpanded = false }
                 )
                 DropdownMenuItem(
-                    text = { Text("Giọng 3 — VIVOS (nhẹ hơn)") },
+                    text = { Text("Nữ nhẹ — VIVOS") },
                     onClick = { voiceId = "vivos"; voiceMenuExpanded = false }
                 )
             }
@@ -177,7 +177,7 @@ fun Screen() {
                 DropdownMenuItem(text = { Text("Tự nhiên, cân bằng") }, onClick = { voiceStyleId = "natural"; voiceStyleMenuExpanded = false })
             }
         }
-        Text("Phong cách điều chỉnh nhịp đọc; chất giọng nam/nữ phụ thuộc mô hình đã chọn. Đây không phải bản sao giọng của người nổi tiếng.", style = MaterialTheme.typography.bodySmall)
+        Text("Phong cách điều chỉnh nhịp đọc; không sao chép giọng người nổi tiếng. Lưu ý: giấy phép mô hình 25hours chưa rõ; VIVOS có điều kiện phi thương mại, nên kiểm tra giấy phép trước khi dùng video kiếm tiền.", style = MaterialTheme.typography.bodySmall)
             }
         }
         Card(modifier = Modifier.fillMaxWidth()) {
