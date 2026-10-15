@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -157,7 +158,7 @@ fun Screen() {
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("🛍 AI viết lại & review sản phẩm", style = MaterialTheme.typography.titleMedium)
-                Text("Tạo lời giới thiệu mới từ thông tin nguồn. Giai đoạn hiện tại nhận nội dung bạn dán vào; bước sau sẽ nối trực tiếp kết quả nhận dạng giọng nói và OCR từ video.", style = MaterialTheme.typography.bodySmall)
+                Text("Tự lấy lời thoại và chữ trên video, sau đó tạo kịch bản review. Có thể chạy mẫu offline hoặc gọi AI online; hãy kiểm tra dữ kiện và sửa kịch bản trước khi xuất.", style = MaterialTheme.typography.bodySmall)
                 OutlinedTextField(
                     value = reviewProductName,
                     onValueChange = { reviewProductName = it },
@@ -238,6 +239,7 @@ fun Screen() {
                         onValueChange = { reviewApiKey = it },
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("API key (chỉ giữ tạm trong màn hình này)") },
+                        visualTransformation = PasswordVisualTransformation(),
                         singleLine = true
                     )
                     Text("Khóa API được gửi đến nhà cung cấp bạn nhập. Chỉ dùng nhà cung cấp đáng tin cậy; không chia sẻ ảnh chụp màn hình có khóa.", style = MaterialTheme.typography.bodySmall)
@@ -264,7 +266,16 @@ fun Screen() {
                                 reviewScript = reviewDrafts.firstOrNull()?.script.orEmpty()
                                 log = if (reviewOnline) "Đã nhận kịch bản từ AI online." else "Đã tạo bản nháp offline từ dữ liệu bạn cung cấp."
                             } catch (e: Exception) {
-                                log = "Không tạo được kịch bản: ${e.message ?: "lỗi không rõ"}"
+                                if (reviewOnline) {
+                                    reviewDrafts = withContext(Dispatchers.Default) {
+                                        ProductReviewEngine.generateOffline(request)
+                                    }
+                                    reviewSelectedIndex = 0
+                                    reviewScript = reviewDrafts.firstOrNull()?.script.orEmpty()
+                                    log = "AI online thất bại (${e.message ?: "lỗi không rõ"}). Đã chuyển sang bản mẫu offline; bản này chỉ sắp xếp thông tin theo mẫu, chưa phải AI viết sáng tạo."
+                                } else {
+                                    log = "Không tạo được kịch bản: ${e.message ?: "lỗi không rõ"}"
+                                }
                             } finally { reviewBusy = false }
                         }
                     }
@@ -630,7 +641,7 @@ fun Screen() {
                     busy = false
                 }
             }
-        ) { Text(if (busy) "Đang xử lý…" else "Bắt đầu dịch") }
+        ) { Text(if (busy) "Đang xử lý…" else if (useReviewNarration) "Tạo video review tiếng Việt" else "Bắt đầu dịch video") }
         if (outputVideoUri != null) {
             Button(
                 onClick = {
