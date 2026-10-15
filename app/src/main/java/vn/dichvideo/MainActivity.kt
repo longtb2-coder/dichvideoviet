@@ -44,7 +44,8 @@ fun Screen() {
     var originalVolume by remember { mutableStateOf(0f) }
     var translatedVolume by remember { mutableStateOf(100f) }
     var coverOriginalText by remember { mutableStateOf(true) }
-    var coverHeightPercent by remember { mutableStateOf(18f) }
+    var coverHeightPercent by remember { mutableStateOf(12f) }
+    var coverTopPercent by remember { mutableStateOf(52f) }
     val voiceLabel = when (voiceId) {
         "25hours_single" -> "Giọng 2 — 25hours (trầm hơn)"
         "vivos" -> "Giọng 3 — VIVOS (nhẹ hơn)"
@@ -176,9 +177,11 @@ fun Screen() {
                     Text("Che vùng phía dưới video trước khi thêm phụ đề Việt")
                 }
                 if (coverOriginalText) {
-                    Text("Chiều cao vùng che: ${coverHeightPercent.toInt()}%")
-                    Slider(value = coverHeightPercent, onValueChange = { coverHeightPercent = it }, valueRange = 8f..30f, steps = 10)
-                    Text("Vùng che màu đen; tăng chiều cao nếu chữ gốc còn lộ. Có thể che mất chi tiết ở mép dưới.", style = MaterialTheme.typography.bodySmall)
+                    Text("Vị trí chữ gốc (tính từ trên xuống): ${coverTopPercent.toInt()}%")
+                    Slider(value = coverTopPercent, onValueChange = { coverTopPercent = it }, valueRange = 35f..82f, steps = 46)
+                    Text("Chiều cao vùng xoá: ${coverHeightPercent.toInt()}%")
+                    Slider(value = coverHeightPercent, onValueChange = { coverHeightPercent = it }, valueRange = 6f..24f, steps = 8)
+                    Text("Mặc định đặt vùng xoá gần giữa video để khớp phụ đề Trung trong clip mẫu. Nếu chữ còn lộ, chỉnh vị trí lên/xuống và tăng chiều cao.", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -207,7 +210,8 @@ fun Screen() {
                             originalVolume = originalVolume / 100f,
                             translatedVolume = translatedVolume / 100f,
                             coverOriginalText = coverOriginalText,
-                            coverHeightPercent = coverHeightPercent
+                            coverHeightPercent = coverHeightPercent,
+                            coverTopPercent = coverTopPercent
                         ) { message ->
                             scope.launch { log += message + "\n" }
                         }
