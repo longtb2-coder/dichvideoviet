@@ -4,6 +4,7 @@ Tính năng trong nhánh phát triển
 - Chọn video trong máy hoặc tải từ link HTTP/HTTPS trực tiếp tới tệp video.
 - Nhận dạng lời thoại bằng SenseVoice + Silero VAD.
 - Quét chữ trong khung hình bằng OCR (Latin, Trung, Nhật, Hàn).
+- Có thể chọn làm mờ vùng phụ đề Trung, thử xóa bằng delogo/nội suy nền, hoặc che đen; chỉnh vị trí và chiều cao vùng xử lý.
 - Dịch lời thoại và chữ sang tiếng Việt bằng ML Kit trên thiết bị.
 - Tạo giọng lồng tiếng Việt bằng Piper/sherpa-onnx và căn theo thời gian.
 - Xuất MP4 có phụ đề tiếng Việt đốt vào hình và lưu SRT riêng.
@@ -12,7 +13,7 @@ Tính năng trong nhánh phát triển
 Giới hạn quan trọng
 - SenseVoice trong cấu hình này nhận dạng tiếng Trung, tiếng Anh, tiếng Nhật, tiếng Hàn và tiếng Quảng Đông; chưa hỗ trợ mọi ngôn ngữ.
 - OCR quét theo khoảng thời gian; chữ xuất hiện nhanh, cách điệu hoặc bị che có thể bị bỏ sót.
-- Ứng dụng dịch chữ thành phụ đề, không tự xóa chữ gốc khỏi hình. Xóa chữ gốc tự nhiên cần xử lý inpainting riêng.
+- Có các chế độ xử lý vùng phụ đề gốc: làm mờ vùng, dùng bộ lọc delogo để nội suy nền (thử nghiệm), hoặc che đen. Đây chưa phải AI inpainting hoàn chỉnh; nền chuyển động phức tạp có thể để lại vệt.
 - Link mạng xã hội yêu cầu đăng nhập, DRM, link HTML hoặc link phát trực tuyến không phải tệp trực tiếp có thể không tải được.
 - Video được mã hóa lại để đốt phụ đề. Tốc độ phụ thuộc độ dài, độ phân giải và chip; hãy thử video ngắn trước.
 - Build thành công không thay thế kiểm thử trên điện thoại thật. Cần kiểm tra tải mô hình, nhận dạng, dịch ngoại tuyến sau khi tắt mạng, lồng tiếng, đồng bộ, OCR và phát lại MP4.
