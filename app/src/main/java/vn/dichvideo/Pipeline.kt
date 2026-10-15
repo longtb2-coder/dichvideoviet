@@ -72,6 +72,7 @@ object Pipeline {
     suspend fun run(
         ctx: Context, video: Uri, srt: Uri?, ocrIntervalSeconds: Double = 1.5,
         voiceId: String = Models.DEFAULT_VOICE,
+        voiceStyleId: String = "review",
         originalVolume: Float = 0f,
         translatedVolume: Float = 1f,
         coverOriginalText: Boolean = false,
@@ -119,7 +120,7 @@ object Pipeline {
             // The Vietnamese voice remains based on speech only, so OCR text is never read aloud.
             val vi = mergeNearDuplicates((speechVi + textVi).sortedBy { it.start })
             val voiceSegs = speechVi
-            val clips = if (voiceSegs.isNotEmpty()) synthesize(ctx, voiceSegs, work, voiceId, log) else emptyList()
+            val clips = if (voiceSegs.isNotEmpty()) synthesize(ctx, voiceSegs, work, voiceId, voiceStyleId, log) else emptyList()
             log("Ghép giọng Việt và phụ đề…")
             val stamp = System.currentTimeMillis()
             val outVideo = File(work, "vi_" + stamp + ".mp4")
@@ -629,7 +630,22 @@ object Pipeline {
     }
 
     /** Đọc từng câu tiếng Việt, tăng tốc nếu dài hơn khoảng thời gian cho phép. */
-    private fun synthesize(ctx: Context, segs: List<Seg>, work: File, voiceId: String, log: (String) -> Unit): List<File> {
+    private fun synthesize(ctx: Context, segs: List<Seg>, work: File, voiceId: String, voiceStyleId: String, log: (String) -> Unit): List<File> {
+        // Presets change delivery speed on-device; they do not imitate a specific real person.
+        val speechSpeed = when (voiceStyleId) {
+            "narration" -> 0.96f
+            "story" -> 0.90f
+            "sales" -> 1.04f
+            "natural" -> 1.0f
+            else -> 1.08f
+        }
+        log("Phong cách giọng đọc: " + when (voiceStyleId) {
+            "narration" -> "thuyết minh rõ ràng"
+            "story" -> "kể chuyện chậm, ấm"
+            "sales" -> "bán hàng năng lượng"
+            "natural" -> "tự nhiên, cân bằng"
+            else -> "review ngắn kiểu TikTok"
+        })
         val tts = OfflineTts(config = OfflineTtsConfig(
             model = OfflineTtsModelConfig(
                 vits = OfflineTtsVitsModelConfig(
@@ -641,7 +657,7 @@ object Pipeline {
                 if (i % 5 == 0) log("Tạo giọng đọc ${i + 1}/${segs.size}…")
                 // Câu được phép đọc kéo dài đến khi câu kế tiếp bắt đầu.
                 val window = maxOf(s.end - s.start, (segs.getOrNull(i + 1)?.start ?: s.end) - s.start)
-                val a = tts.generate(s.text, 0, 1.0f)
+                val a = tts.generate(s.text, 0, speechSpeed)
                 val dur = a.samples.size.toDouble() / a.sampleRate
                 val f = File(work, "t_$i.wav")
                 writeWav(f, a.samples, a.sampleRate)
