@@ -178,6 +178,7 @@ object Pipeline {
         coverTopPercent: Float = 31f,
         textRemovalMode: String = "blur",
         autoDetectTextRegions: Boolean = true,
+        reviewNarration: String? = null,
         log: (String) -> Unit
     ): PipelineOutput =
         withContext(Dispatchers.IO) {
@@ -193,8 +194,19 @@ object Pipeline {
             source.use { i -> input.outputStream().use { i.copyTo(it) } }
             require(input.length() > 1024) { "Tệp video rỗng hoặc không hợp lệ." }
 
+            val videoDurationForReview = run {
+                val retriever = MediaMetadataRetriever()
+                try {
+                    retriever.setDataSource(input.absolutePath)
+                    (retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toDoubleOrNull() ?: 0.0) / 1000.0
+                } finally { retriever.release() }
+            }
+            val useReviewVoice = !reviewNarration.isNullOrBlank()
             val hasAudio = probeHasAudio(input)
-            val speechSegs = if (srt != null) {
+            val speechSegs = if (useReviewVoice) {
+                log("Dùng kịch bản review đã chọn làm lời thuyết minh tiếng Việt…")
+                createReviewNarrationSegments(reviewNarration!!.trim(), videoDurationForReview)
+            } else if (srt != null) {
                 log("Đọc phụ đề nguồn…")
                 val text = ctx.contentResolver.openInputStream(srt)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
                     ?: error("Không mở được tệp SRT.")
@@ -209,7 +221,9 @@ object Pipeline {
             log("Quét chữ/phụ đề trong hình…")
             val textSegs = try { recognizeText(input, ocrIntervalSeconds, log) }
                 catch (e: Exception) { log("Không quét được chữ trong hình; tiếp tục với lời thoại nếu có."); emptyList() }
-            val speechVi = if (speechSegs.isNotEmpty()) translateAll(mergeNearbySpeech(mergeNearDuplicates(speechSegs.sortedBy { it.start })), log) else emptyList()
+            val speechVi = if (speechSegs.isEmpty()) emptyList()
+                else if (useReviewVoice) mergeNearDuplicates(speechSegs.sortedBy { it.start })
+                else translateAll(mergeNearbySpeech(mergeNearDuplicates(speechSegs.sortedBy { it.start })), log)
             val textVi = if (textSegs.isNotEmpty()) translateAll(mergeNearDuplicates(textSegs.sortedBy { it.start }), log) else emptyList()
             if (speechVi.isEmpty() && textVi.isEmpty()) error("Không tìm thấy lời nói hoặc chữ có thể dịch. Thử video rõ hơn hoặc chọn file SRT.")
             if (speechVi.isNotEmpty()) log("Lời nói được dịch riêng để tạo giọng Việt.")
@@ -520,6 +534,26 @@ object Pipeline {
             if (right <= left || bottom <= top || end <= start) null
             else DetectedTextRegion(start, end, left, top, right - left, bottom - top)
         }.sortedBy { it.start }.take(24)
+    }
+
+    private fun createReviewNarrationSegments(text: String, videoDurationSeconds: Double): List<Seg> {
+        require(videoDurationSeconds > 0.5) { "Không đọc được thời lượng video." }
+        val sentences = text.replace(Regex("\\s+"), " ").trim()
+            .split(Regex("(?<=[.!?。！？])\\s+"))
+            .map { it.trim() }.filter { it.isNotBlank() }
+        require(sentences.isNotEmpty()) { "Kịch bản review đang trống." }
+        val result = mutableListOf<Seg>()
+        var cursor = 0.0
+        for (sentence in sentences) {
+            if (cursor >= videoDurationSeconds) break
+            val wordCount = sentence.split(Regex("\\s+")).size
+            val estimatedSeconds = (wordCount / 2.4).coerceAtLeast(1.0)
+            val end = minOf(videoDurationSeconds, cursor + estimatedSeconds)
+            result += Seg(cursor, end, sentence)
+            cursor = end + 0.12
+        }
+        require(result.isNotEmpty()) { "Không thể chia kịch bản thành lời đọc." }
+        return result
     }
 
     private suspend fun recognizeText(input: File, intervalSec: Double, log: (String) -> Unit): List<Seg> {
