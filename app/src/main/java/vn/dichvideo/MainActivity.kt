@@ -58,6 +58,7 @@ fun Screen() {
     var translatedVolume by remember { mutableStateOf(100f) }
     var coverOriginalText by remember { mutableStateOf(true) }
     var textRemovalMode by remember { mutableStateOf("blur") }
+    var autoDetectTextRegions by remember { mutableStateOf(true) }
     var coverHeightPercent by remember { mutableStateOf(8f) }
     var coverTopPercent by remember { mutableStateOf(31f) }
     var previewFrame by remember { mutableStateOf<Bitmap?>(null) }
@@ -281,6 +282,13 @@ fun Screen() {
                     Text("Che vùng phía dưới video trước khi thêm phụ đề Việt")
                 }
                 if (coverOriginalText) {
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Checkbox(checked = autoDetectTextRegions, onCheckedChange = { autoDetectTextRegions = it })
+                        Column(Modifier.weight(1f)) {
+                            Text("Tự dò vị trí chữ theo thời gian")
+                            Text("Quét OCR nhiều khung hình; nếu tắt, dùng vùng căn tay.", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
                     Text("Cách xử lý chữ gốc", style = MaterialTheme.typography.titleSmall)
                     Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                         RadioButton(selected = textRemovalMode == "blur", onClick = { textRemovalMode = "blur" })
@@ -337,6 +345,7 @@ fun Screen() {
                             translatedVolume = translatedVolume / 100f,
                             coverOriginalText = coverOriginalText,
                             textRemovalMode = textRemovalMode,
+                            autoDetectTextRegions = autoDetectTextRegions,
                             coverHeightPercent = coverHeightPercent,
                             coverTopPercent = coverTopPercent
                         ) { message ->
