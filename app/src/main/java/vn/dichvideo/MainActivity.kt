@@ -9,6 +9,19 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import kotlinx.coroutines.tasks.await
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -46,6 +59,8 @@ fun Screen() {
     var coverOriginalText by remember { mutableStateOf(true) }
     var coverHeightPercent by remember { mutableStateOf(8f) }
     var coverTopPercent by remember { mutableStateOf(31f) }
+    var previewFrame by remember { mutableStateOf<Bitmap?>(null) }
+    var detectingRegion by remember { mutableStateOf(false) }
     val voiceLabel = when (voiceId) {
         "25hours_single" -> "Giọng 2 — 25hours (trầm hơn)"
         "vivos" -> "Giọng 3 — VIVOS (nhẹ hơn)"
@@ -65,6 +80,22 @@ fun Screen() {
         if (it != null) {
             try { ctx.contentResolver.takePersistableUriPermission(it, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {}
             srt = it
+        }
+    }
+
+    LaunchedEffect(video) {
+        previewFrame = null
+        val selected = video
+        if (selected != null) {
+            previewFrame = withContext(Dispatchers.IO) {
+                val retriever = MediaMetadataRetriever()
+                try {
+                    retriever.setDataSource(ctx, selected)
+                    val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                    retriever.getFrameAtTime((durationMs.coerceAtLeast(1000L) / 3L) * 1000L, MediaMetadataRetriever.OPTION_CLOSEST)
+                        ?: retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST)
+                } catch (_: Exception) { null } finally { retriever.release() }
+            }
         }
     }
 
@@ -167,6 +198,78 @@ fun Screen() {
                 Text("Giọng dịch tiếng Việt: ${translatedVolume.toInt()}%")
                 Slider(value = translatedVolume, onValueChange = { translatedVolume = it }, valueRange = 0f..100f, steps = 19)
                 Text("Gợi ý: để tiếng gốc 0% nếu lời Trung và lời Việt bị chồng nhau.", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("👁 Xem trước và căn vùng che", style = MaterialTheme.typography.titleMedium)
+                if (previewFrame != null) {
+                    Box(Modifier.fillMaxWidth().aspectRatio(previewFrame!!.width.toFloat() / previewFrame!!.height.toFloat())) {
+                        Image(bitmap = previewFrame!!.asImageBitmap(), contentDescription = "Khung hình video mẫu", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.FillBounds)
+                        Canvas(Modifier.fillMaxSize()) {
+                            if (coverOriginalText) {
+                                val y = size.height * coverTopPercent / 100f
+                                val h = size.height * coverHeightPercent / 100f
+                                drawRect(color = Color(0x99000000), topLeft = Offset(size.width * 0.08f, y), size = Size(size.width * 0.84f, h))
+                            }
+                        }
+                    }
+                    Text("Vùng tối trên ảnh là phần sẽ bị che khi xuất video.", style = MaterialTheme.typography.bodySmall)
+                } else {
+                    Text("Chọn video để hiện khung hình xem trước.", style = MaterialTheme.typography.bodySmall)
+                }
+                Button(
+                    enabled = video != null && !busy && !detectingRegion,
+                    onClick = {
+                        val selected = video ?: return@Button
+                        scope.launch {
+                            detectingRegion = true
+                            try {
+                                val region = withContext(Dispatchers.IO) {
+                                    val retriever = MediaMetadataRetriever()
+                                    val found = mutableListOf<android.graphics.Rect>()
+                                    try {
+                                        retriever.setDataSource(ctx, selected)
+                                        val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                                        val frameBitmap = previewFrame
+                                        val frameH = frameBitmap?.height ?: 1
+                                        val latin = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+                                        val chinese = TextRecognition.getClient(ChineseTextRecognizerOptions.Builder().build())
+                                        try {
+                                            for (fraction in listOf(0.25, 0.5, 0.75)) {
+                                                val frame = retriever.getFrameAtTime((durationMs * fraction).toLong() * 1000L, MediaMetadataRetriever.OPTION_CLOSEST) ?: continue
+                                                try {
+                                                    val image = InputImage.fromBitmap(frame, 0)
+                                                    val results = listOf(latin.process(image).await(), chinese.process(image).await())
+                                                    results.flatMap { it.textBlocks }.mapNotNull { it.boundingBox }.filter {
+                                                        it.width() > frame.width * 0.12 && it.height() > frame.height * 0.012 &&
+                                                            it.centerY() > frame.height * 0.12 && it.centerY() < frame.height * 0.82
+                                                    }.forEach { found.add(android.graphics.Rect(it)) }
+                                                } finally { frame.recycle() }
+                                            }
+                                        } finally { latin.close(); chinese.close() }
+                                        if (found.isEmpty()) null else {
+                                            val band = maxOf(1, frameH / 20)
+                                            val best = found.groupBy { it.centerY() / band }.values.maxByOrNull { boxes ->
+                                                boxes.size * boxes.map { it.width() }.average()
+                                            } ?: found
+                                            val top = best.map { it.top }.average().toFloat() / frameH * 100f
+                                            val bottom = best.map { it.bottom }.average().toFloat() / frameH * 100f
+                                            top.coerceIn(20f, 65f) to (bottom - top + 4f).coerceIn(6f, 18f)
+                                        }
+                                    } finally { retriever.release() }
+                                }
+                                if (region != null) {
+                                    coverTopPercent = region.first
+                                    coverHeightPercent = region.second
+                                    log = "Đã tìm thấy vùng có chữ gần vị trí ${region.first.toInt()}%. Hãy kiểm tra ảnh xem trước và chỉnh lại nếu cần."
+                                } else log = "Chưa tự tìm được vùng chữ ổn định. Bạn có thể chỉnh vị trí và chiều cao bằng thanh trượt bên dưới."
+                            } catch (e: Exception) {
+                                log = "Không tự nhận diện được vùng chữ: ${e.message ?: "hãy chỉnh bằng tay"}"
+                            } finally { detectingRegion = false }
+                        }
+                    }
+                ) { Text(if (detectingRegion) "Đang tìm vùng chữ…" else "✨ Tự nhận diện vùng chữ") }
             }
         }
         Card(modifier = Modifier.fillMaxWidth()) {
