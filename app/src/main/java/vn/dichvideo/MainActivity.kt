@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
@@ -27,7 +28,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        setContent { MaterialTheme { Screen() } }
+        setContent { MaterialTheme(colorScheme = lightColorScheme(primary = Color(0xFF087F8C), secondary = Color(0xFF6B5CE7), background = Color(0xFFF4F7FB), surface = Color(0xFFFFFFFF))) { Screen() } }
     }
 }
 
@@ -40,10 +41,14 @@ fun Screen() {
     var ocrInterval by remember { mutableStateOf("1.5") }
     var voiceId by remember { mutableStateOf("vais1000") }
     var voiceMenuExpanded by remember { mutableStateOf(false) }
+    var originalVolume by remember { mutableStateOf(0f) }
+    var translatedVolume by remember { mutableStateOf(100f) }
+    var coverOriginalText by remember { mutableStateOf(true) }
+    var coverHeightPercent by remember { mutableStateOf(18f) }
     val voiceLabel = when (voiceId) {
-        "25hours_single" -> "Giọng 2 — 25hours (nhẹ, low)"
-        "vivos" -> "Giọng 3 — VIVOS (nhẹ, x-low)"
-        else -> "Giọng 1 — VAIS1000 (medium, mặc định)"
+        "25hours_single" -> "Giọng 2 — 25hours (trầm hơn)"
+        "vivos" -> "Giọng 3 — VIVOS (nhẹ hơn)"
+        else -> "Giọng 1 — VAIS1000 (tự nhiên)"
     }
     var log by remember { mutableStateOf("") }
     var outputVideoUri by remember { mutableStateOf<String?>(null) }
@@ -88,30 +93,42 @@ fun Screen() {
         Modifier.fillMaxSize().systemBarsPadding().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text("Dịch video sang giọng Việt", style = MaterialTheme.typography.titleLarge)
-        Text("Chạy offline sau khi tải mô hình. Lần đầu cần mạng để tải nhận dạng, dịch và giọng đọc.")
-        Text("Chọn giọng đọc tiếng Việt", style = MaterialTheme.typography.titleMedium)
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("VIDEO VIỆT HÓA", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)
+                Text("Dịch lời thoại • Lồng tiếng Việt • Phụ đề", style = MaterialTheme.typography.titleMedium)
+                Text("Xử lý trên điện thoại sau khi tải mô hình. Lần đầu cần kết nối mạng.", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("🎙 Chọn giọng đọc tiếng Việt", style = MaterialTheme.typography.titleMedium)
         Box {
             OutlinedButton(onClick = { voiceMenuExpanded = true }, enabled = !busy) {
                 Text(voiceLabel)
             }
             DropdownMenu(expanded = voiceMenuExpanded, onDismissRequest = { voiceMenuExpanded = false }) {
                 DropdownMenuItem(
-                    text = { Text("Giọng 1 — VAIS1000 (medium, mặc định)") },
+                    text = { Text("Giọng 1 — VAIS1000 (tự nhiên, mặc định)") },
                     onClick = { voiceId = "vais1000"; voiceMenuExpanded = false }
                 )
                 DropdownMenuItem(
-                    text = { Text("Giọng 2 — 25hours (low)") },
+                    text = { Text("Giọng 2 — 25hours (trầm hơn)") },
                     onClick = { voiceId = "25hours_single"; voiceMenuExpanded = false }
                 )
                 DropdownMenuItem(
-                    text = { Text("Giọng 3 — VIVOS (x-low)") },
+                    text = { Text("Giọng 3 — VIVOS (nhẹ hơn)") },
                     onClick = { voiceId = "vivos"; voiceMenuExpanded = false }
                 )
             }
         }
-        Text("Giọng được tải riêng ở lần đầu chọn; lần sau có thể dùng ngoại tuyến.")
-        Button(enabled = !busy, onClick = { pickVideo.launch(arrayOf("video/*")) }) {
+        Text("Các giọng này chạy trên máy sau khi tải mô hình; đây không phải bản sao giọng TikTok độc quyền.", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("🎬 Video đầu vào", style = MaterialTheme.typography.titleMedium)
+        Button(enabled = !busy, onClick = { pickVideo.launch(arrayOf("video/*")) })
             Text(if (video == null) "① Chọn video trong điện thoại" else "Đã chọn video ✓")
         }
         OutlinedTextField(
@@ -139,6 +156,35 @@ fun Screen() {
         ) { Text("Tải video từ link") }
         Button({ pickSrt.launch(arrayOf("*/*")) }) { Text(if (srt == null) "Chọn file phụ đề .srt (tuỳ chọn)" else "Đã chọn phụ đề ✓") }
         if (srt != null) TextButton({ srt = null }) { Text("Bỏ SRT, tự nhận dạng lời thoại") }
+            }
+        }
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("🔊 Cân chỉnh âm thanh", style = MaterialTheme.typography.titleMedium)
+                Text("Âm thanh gốc: ${originalVolume.toInt()}%")
+                Slider(value = originalVolume, onValueChange = { originalVolume = it }, valueRange = 0f..100f, steps = 19)
+                Text("Giọng dịch tiếng Việt: ${translatedVolume.toInt()}%")
+                Slider(value = translatedVolume, onValueChange = { translatedVolume = it }, valueRange = 0f..100f, steps = 19)
+                Text("Gợi ý: để tiếng gốc 0% nếu lời Trung và lời Việt bị chồng nhau.", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("🧽 Che chữ phụ đề gốc", style = MaterialTheme.typography.titleMedium)
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Checkbox(checked = coverOriginalText, onCheckedChange = { coverOriginalText = it })
+                    Text("Che vùng phía dưới video trước khi thêm phụ đề Việt")
+                }
+                if (coverOriginalText) {
+                    Text("Chiều cao vùng che: ${coverHeightPercent.toInt()}%")
+                    Slider(value = coverHeightPercent, onValueChange = { coverHeightPercent = it }, valueRange = 8f..30f, steps = 10)
+                    Text("Vùng che màu đen; tăng chiều cao nếu chữ gốc còn lộ. Có thể che mất chi tiết ở mép dưới.", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("⚙️ Nhận dạng chữ trong hình", style = MaterialTheme.typography.titleMedium)
         OutlinedTextField(
             value = ocrInterval,
             onValueChange = { ocrInterval = it },
@@ -146,6 +192,8 @@ fun Screen() {
             label = { Text("Khoảng quét chữ trong hình (giây, 0,5–10)") },
             singleLine = true
         )
+            }
+        }
         Button(
             enabled = !busy && video != null,
             onClick = {
@@ -154,7 +202,13 @@ fun Screen() {
                     try {
                         val interval = ocrInterval.replace(',', '.').toDoubleOrNull()
                         require(interval != null && interval in 0.5..10.0) { "Khoảng quét phải từ 0,5 đến 10 giây." }
-                        val out = Pipeline.run(ctx, video!!, srt, interval!!, voiceId) { message ->
+                        val out = Pipeline.run(
+                            ctx, video!!, srt, interval!!, voiceId,
+                            originalVolume = originalVolume / 100f,
+                            translatedVolume = translatedVolume / 100f,
+                            coverOriginalText = coverOriginalText,
+                            coverHeightPercent = coverHeightPercent
+                        ) { message ->
                             scope.launch { log += message + "\n" }
                         }
                         outputVideoUri = out.videoUri
