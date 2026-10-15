@@ -44,8 +44,8 @@ fun Screen() {
     var originalVolume by remember { mutableStateOf(0f) }
     var translatedVolume by remember { mutableStateOf(100f) }
     var coverOriginalText by remember { mutableStateOf(true) }
-    var coverHeightPercent by remember { mutableStateOf(12f) }
-    var coverTopPercent by remember { mutableStateOf(52f) }
+    var coverHeightPercent by remember { mutableStateOf(8f) }
+    var coverTopPercent by remember { mutableStateOf(31f) }
     val voiceLabel = when (voiceId) {
         "25hours_single" -> "Giọng 2 — 25hours (trầm hơn)"
         "vivos" -> "Giọng 3 — VIVOS (nhẹ hơn)"
@@ -178,10 +178,10 @@ fun Screen() {
                 }
                 if (coverOriginalText) {
                     Text("Vị trí chữ gốc (tính từ trên xuống): ${coverTopPercent.toInt()}%")
-                    Slider(value = coverTopPercent, onValueChange = { coverTopPercent = it }, valueRange = 35f..82f, steps = 46)
+                    Slider(value = coverTopPercent, onValueChange = { coverTopPercent = it }, valueRange = 20f..65f, steps = 44)
                     Text("Chiều cao vùng xoá: ${coverHeightPercent.toInt()}%")
-                    Slider(value = coverHeightPercent, onValueChange = { coverHeightPercent = it }, valueRange = 6f..24f, steps = 8)
-                    Text("Mặc định đặt vùng xoá gần giữa video để khớp phụ đề Trung trong clip mẫu. Nếu chữ còn lộ, chỉnh vị trí lên/xuống và tăng chiều cao.", style = MaterialTheme.typography.bodySmall)
+                    Slider(value = coverHeightPercent, onValueChange = { coverHeightPercent = it }, valueRange = 6f..18f, steps = 11)
+                    Text("Mặc định đặt vùng che gần vị trí phụ đề trong clip mẫu. Vùng che là dải đen gọn; chỉnh vị trí lên/xuống và chiều cao cho khớp chữ gốc.", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
