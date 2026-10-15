@@ -173,6 +173,26 @@ fun Screen() {
                     minLines = 4,
                     maxLines = 8
                 )
+                OutlinedButton(
+                    enabled = video != null && !busy && !reviewBusy,
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = {
+                        val selectedVideo = video ?: return@OutlinedButton
+                        scope.launch {
+                            reviewBusy = true
+                            log = "Đang lấy nội dung từ video…"
+                            try {
+                                val interval = ocrInterval.replace(',', '.').toDoubleOrNull() ?: 1.5
+                                reviewSourceFacts = Pipeline.extractReviewSource(ctx, selectedVideo, srt, interval) { message ->
+                                    scope.launch { log = message }
+                                }
+                                log = "Đã lấy nội dung lời thoại/chữ trên hình. Hãy kiểm tra lại dữ kiện rồi tạo kịch bản."
+                            } catch (e: Exception) {
+                                log = "Không lấy được nội dung video: ${e.message ?: "lỗi không rõ"}"
+                            } finally { reviewBusy = false }
+                        }
+                    }
+                ) { Text(if (reviewBusy) "Đang phân tích video…" else "🎞 Lấy lời thoại và chữ từ video đã chọn") }
                 Text("Phong cách viết", style = MaterialTheme.typography.titleSmall)
                 ReviewStyle.values().forEach { option ->
                     Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
