@@ -115,7 +115,9 @@ object Pipeline {
             if (speechVi.isEmpty() && textVi.isEmpty()) error("Không tìm thấy lời nói hoặc chữ có thể dịch. Thử video rõ hơn hoặc chọn file SRT.")
             if (speechVi.isNotEmpty()) log("Lời nói được dịch riêng để tạo giọng Việt.")
             if (textVi.isNotEmpty()) log("Chữ trên hình được dịch riêng thành phụ đề; không dùng OCR để tạo giọng đọc.")
-            val vi = if (textVi.isNotEmpty()) textVi else speechVi
+            // Keep translated dialogue and translated on-screen text in subtitles.
+            // The Vietnamese voice remains based on speech only, so OCR text is never read aloud.
+            val vi = mergeNearDuplicates((speechVi + textVi).sortedBy { it.start })
             val voiceSegs = speechVi
             val clips = if (voiceSegs.isNotEmpty()) synthesize(ctx, voiceSegs, work, voiceId, log) else emptyList()
             log("Ghép giọng Việt và phụ đề…")
@@ -172,8 +174,7 @@ object Pipeline {
             val regionY = (videoHeight * regionTop).toInt().coerceAtLeast(0)
             val regionW = (videoWidth * 0.84f).toInt().coerceAtMost(videoWidth - regionX).coerceAtLeast(2)
             val regionPixelH = (videoHeight * regionH).toInt().coerceAtLeast(2).coerceAtMost(videoHeight - regionY)
-            val escapedSubtitlePath = subtitleFile.absolutePath.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
-            val subtitleFilterForGraph = "subtitles='" + escapedSubtitlePath + "':fontsdir='/system/fonts':force_style='FontName=Noto Sans,FontSize=24,Outline=2,Shadow=1,Alignment=2,MarginV=30'"
+            val subtitleFilterForGraph = subtitleTextFilter
             var videoGraphUsed = false
             if (coverOriginalText && detectedRegions.isNotEmpty()) {
                 var currentLabel = "0:v"
@@ -560,30 +561,64 @@ object Pipeline {
         else -> null
     }
 
-    /** Dịch từng câu sang tiếng Việt bằng ML Kit (tự nhận diện ngôn ngữ từng câu). */
+    /** Dịch từng câu sang tiếng Việt trên thiết bị, ưu tiên nhận diện theo chữ viết trước. */
     private suspend fun translateAll(segs: List<Seg>, log: (String) -> Unit): List<Seg> {
+        if (segs.isEmpty()) return emptyList()
         val idClient = LanguageIdentification.getClient()
         val translators = mutableMapOf<String, Translator>()
+        val downloadedLanguages = mutableSetOf<String>()
         val out = mutableListOf<Seg>()
         try {
             segs.forEachIndexed { i, s ->
-                if (i % 10 == 0) log("Dịch sang tiếng Việt ${i + 1}/${segs.size}…")
-                var tag = idClient.identifyLanguage(s.text).await()
-                if (tag == "und") tag = guessTag(s.text) ?: "und"
-                if (tag == "yue") tag = "zh"
-                if (tag == "vi") { out += s; return@forEachIndexed }
-                val lang = if (tag == "und") null else TranslateLanguage.fromLanguageTag(tag)
-                if (lang == null) { log("Bỏ qua 1 câu (chưa nhận diện/hỗ trợ ngôn ngữ): ${s.text.take(30)}"); return@forEachIndexed }
-                val tr = translators.getOrPut(lang) {
-                    Translation.getClient(TranslatorOptions.Builder()
-                        .setSourceLanguage(lang).setTargetLanguage(TranslateLanguage.VIETNAMESE).build())
+                if (i % 5 == 0) log("Dịch sang tiếng Việt ${i + 1}/${segs.size}…")
+                val scriptTag = guessTag(s.text)
+                var tag = scriptTag ?: try {
+                    idClient.identifyLanguage(s.text).await()
+                } catch (e: Exception) {
+                    log("Không nhận diện được ngôn ngữ câu ${i + 1}; sẽ thử giữ nguyên câu này.")
+                    "und"
                 }
-                tr.downloadModelIfNeeded().await()
-                out += s.copy(text = tr.translate(s.text).await())
+                if (tag == "yue") tag = "zh"
+                if (tag == "vi") {
+                    out += s
+                    return@forEachIndexed
+                }
+                val lang = if (tag == "und") null else TranslateLanguage.fromLanguageTag(tag)
+                if (lang == null) {
+                    log("Không xác định hoặc chưa hỗ trợ ngôn ngữ ở câu ${i + 1}; giữ nguyên nội dung nguồn: ${s.text.take(45)}")
+                    out += s
+                    return@forEachIndexed
+                }
+                val translator = translators.getOrPut(lang) {
+                    Translation.getClient(
+                        TranslatorOptions.Builder()
+                            .setSourceLanguage(lang)
+                            .setTargetLanguage(TranslateLanguage.VIETNAMESE)
+                            .build()
+                    )
+                }
+                try {
+                    if (downloadedLanguages.add(lang)) {
+                        log("Chuẩn bị mô hình dịch ${lang} → tiếng Việt (chỉ cần tải lần đầu)…")
+                        translator.downloadModelIfNeeded().await()
+                    }
+                    val translated = translator.translate(s.text).await().trim()
+                    if (translated.isNotBlank()) out += s.copy(text = translated)
+                    else {
+                        log("Mô hình trả về câu dịch rỗng ở câu ${i + 1}; giữ nguyên câu nguồn.")
+                        out += s
+                    }
+                } catch (e: Exception) {
+                    downloadedLanguages.remove(lang)
+                    log("Dịch câu ${i + 1} thất bại (${e.message ?: "lỗi mô hình/mạng"}); giữ nguyên câu nguồn.")
+                    out += s
+                }
             }
         } finally {
-            idClient.close(); translators.values.forEach { it.close() }
+            idClient.close()
+            translators.values.forEach { it.close() }
         }
+        if (out.isEmpty()) error("Không dịch được câu nào. Kiểm tra ngôn ngữ nguồn hoặc kết nối mạng để tải mô hình dịch lần đầu.")
         return out
     }
 
