@@ -215,12 +215,14 @@ fun Screen() {
                     previewing = false
                     log = "Đang chuẩn bị nghe thử giọng…\n"
                     try {
-                        val sampleFile = Pipeline.createVoicePreview(ctx, voiceId, voiceStyleId, previewText) { message ->
-                            scope.launch { log += message + "\n" }
-                        }
                         previewPlayer?.let { old ->
                             try { old.stop() } catch (_: Exception) {}
                             try { old.release() } catch (_: Exception) {}
+                        }
+                        previewPlayer = null
+                        previewing = false
+                        val sampleFile = Pipeline.createVoicePreview(ctx, voiceId, voiceStyleId, previewText) { message ->
+                            scope.launch { log += message + "\n" }
                         }
                         previewPlayer = MediaPlayer().apply {
                             setDataSource(sampleFile.absolutePath)
@@ -248,7 +250,17 @@ fun Screen() {
                     } finally { busy = false }
                 }
             }
-        ) { Text(if (previewing) "▶ Đang nghe thử…" else "▶ Nghe thử giọng đã chọn") }
+        ) { Text("▶ Nghe thử giọng đã chọn") }
+        if (previewing && previewPlayer != null) {
+            TextButton(onClick = {
+                previewPlayer?.let { player ->
+                    try { player.stop() } catch (_: Exception) {}
+                    try { player.release() } catch (_: Exception) {}
+                }
+                previewPlayer = null
+                previewing = false
+            }, modifier = Modifier.fillMaxWidth()) { Text("■ Dừng nghe thử") }
+        }
         Text("Phong cách hiện điều chỉnh tốc độ đọc; các lựa chọn VIVOS dùng nhiều speaker trong cùng một mô hình, chưa được gán nhãn nam/nữ đã xác minh. Không sao chép giọng người nổi tiếng. Lưu ý: giấy phép mô hình 25hours chưa rõ; VIVOS có điều kiện phi thương mại, nên kiểm tra giấy phép trước khi dùng video kiếm tiền.", style = MaterialTheme.typography.bodySmall)
             }
         }
