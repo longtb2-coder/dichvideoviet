@@ -250,13 +250,13 @@ fun Screen() {
                     onClick = {
                         scope.launch {
                             reviewBusy = true
+                            val request = ReviewRequest(
+                                productName = reviewProductName,
+                                sourceFacts = reviewSourceFacts,
+                                style = reviewStyle,
+                                durationSeconds = reviewDuration
+                            )
                             try {
-                                val request = ReviewRequest(
-                                    productName = reviewProductName,
-                                    sourceFacts = reviewSourceFacts,
-                                    style = reviewStyle,
-                                    durationSeconds = reviewDuration
-                                )
                                 reviewDrafts = if (reviewOnline) {
                                     ProductReviewEngine.generateOnline(request, reviewEndpoint.trim(), reviewModel.trim(), reviewApiKey.trim())
                                 } else {
