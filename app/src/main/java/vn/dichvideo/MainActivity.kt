@@ -78,6 +78,18 @@ fun Screen() {
     var log by remember { mutableStateOf("") }
     var outputVideoUri by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var reviewProductName by remember { mutableStateOf("") }
+    var reviewSourceFacts by remember { mutableStateOf("") }
+    var reviewStyle by remember { mutableStateOf(ReviewStyle.FRIENDLY) }
+    var reviewDuration by remember { mutableStateOf(30) }
+    var reviewOnline by remember { mutableStateOf(false) }
+    var reviewEndpoint by remember { mutableStateOf("https://api.openai.com/v1/chat/completions") }
+    var reviewModel by remember { mutableStateOf("gpt-4o-mini") }
+    var reviewApiKey by remember { mutableStateOf("") }
+    var reviewDrafts by remember { mutableStateOf<List<ReviewDraft>>(emptyList()) }
+    var reviewSelectedIndex by remember { mutableIntStateOf(0) }
+    var reviewScript by remember { mutableStateOf("") }
+    var reviewBusy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val pickVideo = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {
         if (it != null) {
@@ -139,6 +151,130 @@ fun Screen() {
                 Text("VIDEO VIỆT HÓA", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)
                 Text("Dịch lời thoại • Lồng tiếng Việt • Phụ đề", style = MaterialTheme.typography.titleMedium)
                 Text("Xử lý trên điện thoại sau khi tải mô hình. Lần đầu cần kết nối mạng.", style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("🛍 AI viết lại & review sản phẩm", style = MaterialTheme.typography.titleMedium)
+                Text("Tạo lời giới thiệu mới từ thông tin nguồn. Giai đoạn hiện tại nhận nội dung bạn dán vào; bước sau sẽ nối trực tiếp kết quả nhận dạng giọng nói và OCR từ video.", style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(
+                    value = reviewProductName,
+                    onValueChange = { reviewProductName = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Tên sản phẩm (nếu biết)") },
+                    singleLine = true
+                )
+                OutlinedTextField(
+                    value = reviewSourceFacts,
+                    onValueChange = { reviewSourceFacts = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Nội dung lời thoại, chữ trên video hoặc thông tin sản phẩm") },
+                    placeholder = { Text("Dán nội dung đã nhận dạng hoặc mô tả sản phẩm tại đây…") },
+                    minLines = 4,
+                    maxLines = 8
+                )
+                Text("Phong cách viết", style = MaterialTheme.typography.titleSmall)
+                ReviewStyle.values().forEach { option ->
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        RadioButton(selected = reviewStyle == option, onClick = { reviewStyle = option })
+                        Text(option.title, modifier = Modifier.weight(1f))
+                    }
+                }
+                Text("Thời lượng mục tiêu")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(15, 30, 60).forEach { seconds ->
+                        FilterChip(
+                            selected = reviewDuration == seconds,
+                            onClick = { reviewDuration = seconds },
+                            label = { Text("$seconds giây") }
+                        )
+                    }
+                }
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Checkbox(checked = reviewOnline, onCheckedChange = { reviewOnline = it })
+                    Column(Modifier.weight(1f)) {
+                        Text("Dùng AI online")
+                        Text("Bỏ chọn để viết lại bằng mẫu offline, không cần khóa API.", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                if (reviewOnline) {
+                    OutlinedTextField(
+                        value = reviewEndpoint,
+                        onValueChange = { reviewEndpoint = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Địa chỉ API tương thích chat-completions (HTTPS)") },
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = reviewModel,
+                        onValueChange = { reviewModel = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Tên model") },
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = reviewApiKey,
+                        onValueChange = { reviewApiKey = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("API key (chỉ giữ tạm trong màn hình này)") },
+                        singleLine = true
+                    )
+                    Text("Khóa API được gửi đến nhà cung cấp bạn nhập. Chỉ dùng nhà cung cấp đáng tin cậy; không chia sẻ ảnh chụp màn hình có khóa.", style = MaterialTheme.typography.bodySmall)
+                }
+                Button(
+                    enabled = !reviewBusy && !busy && reviewSourceFacts.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = {
+                        scope.launch {
+                            reviewBusy = true
+                            try {
+                                val request = ReviewRequest(
+                                    productName = reviewProductName,
+                                    sourceFacts = reviewSourceFacts,
+                                    style = reviewStyle,
+                                    durationSeconds = reviewDuration
+                                )
+                                reviewDrafts = if (reviewOnline) {
+                                    ProductReviewEngine.generateOnline(request, reviewEndpoint.trim(), reviewModel.trim(), reviewApiKey.trim())
+                                } else {
+                                    withContext(Dispatchers.Default) { ProductReviewEngine.generateOffline(request) }
+                                }
+                                reviewSelectedIndex = 0
+                                reviewScript = reviewDrafts.firstOrNull()?.script.orEmpty()
+                                log = if (reviewOnline) "Đã nhận kịch bản từ AI online." else "Đã tạo bản nháp offline từ dữ liệu bạn cung cấp."
+                            } catch (e: Exception) {
+                                log = "Không tạo được kịch bản: ${e.message ?: "lỗi không rõ"}"
+                            } finally { reviewBusy = false }
+                        }
+                    }
+                ) { Text(if (reviewBusy) "Đang viết kịch bản…" else if (reviewOnline) "✨ Tạo 3 kịch bản bằng AI online" else "✍️ Tạo 3 bản offline") }
+                if (reviewDrafts.isNotEmpty()) {
+                    Text("Chọn bản nháp", style = MaterialTheme.typography.titleSmall)
+                    reviewDrafts.forEachIndexed { index, draft ->
+                        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            RadioButton(selected = reviewSelectedIndex == index, onClick = {
+                                reviewSelectedIndex = index
+                                reviewScript = draft.script
+                            })
+                            Column(Modifier.weight(1f)) {
+                                Text(draft.title)
+                                Text(if (draft.online) "Tạo online" else "Tạo offline", style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                    OutlinedTextField(
+                        value = reviewScript,
+                        onValueChange = { reviewScript = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Sửa lời review trước khi dùng") },
+                        minLines = 4,
+                        maxLines = 10
+                    )
+                    Button(
+                        onClick = { previewText = reviewScript; log = "Đã chuyển kịch bản sang ô nghe thử giọng. Hãy chọn giọng và bấm Nghe thử." },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("🎙 Dùng kịch bản làm mẫu giọng đọc") }
+                }
             }
         }
         Card(modifier = Modifier.fillMaxWidth()) {
