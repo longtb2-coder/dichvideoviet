@@ -46,11 +46,9 @@ object Models {
     /** Chỉ tải mô hình cần để phân tích video; không tải TTS nếu người dùng chưa tạo giọng. */
     fun ensureAnalysis(ctx: Context, log: (String) -> Unit) {
         val base = root(ctx)
+        // Speech recognition now processes bounded audio chunks without the native VAD path.
+        // This reduces model loading and avoids a VAD-related native process exit on some phones.
         fetchArchive(File(base, "sense"), SENSE_URL, "mô hình nhận dạng (khoảng 230 MB)", log)
-        if (!vad(ctx).exists()) {
-            vad(ctx).parentFile!!.mkdirs()
-            download(VAD_URL, vad(ctx), "bộ cắt câu", log)
-        }
     }
 
     fun ensure(ctx: Context, voiceId: String = DEFAULT_VOICE, log: (String) -> Unit) {
