@@ -81,6 +81,61 @@ object ProductReviewEngine {
     }
 
     /**
+     * Research public product information with OpenAI Responses API web search.
+     * Requires an OpenAI API key with API billing/usage enabled; ChatGPT subscriptions alone
+     * do not automatically provide API credits. The returned text includes URLs for checking.
+     */
+    suspend fun researchProductOnline(productName: String, sourceFacts: String, model: String, apiKey: String): String =
+        withContext(Dispatchers.IO) {
+            require(productName.isNotBlank()) { "Hãy nhập tên hoặc mã sản phẩm trước khi tìm." }
+            require(apiKey.isNotBlank()) { "Hãy nhập OpenAI API key." }
+            require(model.isNotBlank()) { "Hãy nhập tên model AI." }
+            val connection = (URL("https://api.openai.com/v1/responses").openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = 20000
+                readTimeout = 90000
+                doOutput = true
+                setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                setRequestProperty("Authorization", "Bearer $apiKey")
+            }
+            try {
+                val prompt = "Tìm kiếm web về sản phẩm có tên/mã chính xác: $productName. Dữ liệu nhận diện từ video (có thể sai OCR): ${sourceFacts.take(5000)}. " +
+                    "Ưu tiên trang hãng, trang bán hàng chính thức và nguồn đáng tin. Trả lời bằng tiếng Việt theo các mục: " +
+                    "Tên/phiên bản xác định được; thông tin có nguồn xác nhận; thông số/công dụng chưa xác minh; " +
+                    "3-6 URL nguồn cụ thể. Không gán thông tin của sản phẩm gần giống sang sản phẩm này. " +
+                    "Nếu không xác định chắc đúng mẫu, nói rõ chưa xác minh. Không bịa giá còn hiệu lực, chứng nhận, hiệu quả hoặc trải nghiệm."
+                val payload = JSONObject()
+                    .put("model", model)
+                    .put("tools", JSONArray().put(JSONObject().put("type", "web_search_preview")))
+                    .put("input", prompt)
+                connection.outputStream.use { it.write(payload.toString().toByteArray(Charsets.UTF_8)) }
+                val code = connection.responseCode
+                val stream = if (code in 200..299) connection.inputStream else connection.errorStream
+                val raw = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                if (code !in 200..299) {
+                    val message = try { JSONObject(raw).optJSONObject("error")?.optString("message") } catch (_: Exception) { null }
+                    error("Tìm kiếm web thất bại (HTTP $code)${message?.takeIf { it.isNotBlank() }?.let { ": $it" } ?: "."}")
+                }
+                val json = JSONObject(raw)
+                val direct = json.optString("output_text", "").trim()
+                val result = if (direct.isNotBlank()) direct else buildString {
+                    val output = json.optJSONArray("output") ?: JSONArray()
+                    for (i in 0 until output.length()) {
+                        val content = output.optJSONObject(i)?.optJSONArray("content") ?: continue
+                        for (j in 0 until content.length()) {
+                            val item = content.optJSONObject(j) ?: continue
+                            if (item.optString("type") == "output_text") append(item.optString("text")).append("\\n")
+                        }
+                    }
+                }.trim()
+                require(result.isNotBlank()) { "AI tìm kiếm không trả về thông tin sản phẩm." }
+                result.take(9000)
+            } finally {
+                connection.disconnect()
+            }
+        }
+
+    /**
      * Optional OpenAI-compatible chat-completions endpoint. API key is supplied at runtime,
      * not persisted by this module. Use HTTPS and a trusted provider.
      */
