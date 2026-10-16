@@ -298,7 +298,9 @@ object Pipeline {
             val subtitleMarginV = if (coverOriginalText)
                 (videoHeight - subtitleCenterY).coerceIn(24, (videoHeight - 24).coerceAtLeast(24))
             else 30
-            val subtitleTextFilter = "subtitles='" + escapedSubtitlePath + "':fontsdir='/system/fonts':force_style='FontName=Noto Sans,FontSize=24,Outline=2,Shadow=1,BorderStyle=3,BackColour=&H80000000,Alignment=2,MarginV=$subtitleMarginV'"
+            // Use readable white subtitles with a dark outline, without a large translucent box.
+            // This more closely matches clean social-video subtitles and keeps the footage visible.
+            val subtitleTextFilter = "subtitles='" + escapedSubtitlePath + "':fontsdir='/system/fonts':force_style='FontName=Noto Sans,FontSize=30,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=3,Shadow=1,BorderStyle=1,Alignment=2,MarginV=$subtitleMarginV'"
             val subtitleFilterForGraph = subtitleTextFilter
             var videoGraphUsed = false
             if (coverOriginalText && detectedRegions.isNotEmpty()) {
@@ -494,7 +496,16 @@ object Pipeline {
                                 val bottom = (b.bottom * sy).toInt()
                                 if (right - left < frameWidth * 0.015 || bottom - top < frameHeight * 0.008) null
                                 else android.graphics.Rect(left, top, right, bottom)
-                            }.filter { it.left >= 0 && it.top >= 0 && it.right <= frameWidth && it.bottom <= frameHeight }
+                            }.filter { box ->
+                                // Subtitle replacement should target the lower subtitle band, not
+                                // unrelated Chinese text on packaging, labels, or wall calendars.
+                                box.left >= frameWidth * 0.04 &&
+                                    box.right <= frameWidth * 0.96 &&
+                                    box.top >= frameHeight * 0.55 &&
+                                    box.bottom <= frameHeight * 0.97 &&
+                                    box.width() >= frameWidth * 0.04 &&
+                                    box.height() >= frameHeight * 0.008
+                            }
                             boxes.forEach { box ->
                                 val cx = box.centerX().toFloat()
                                 val cy = box.centerY().toFloat()
@@ -527,8 +538,10 @@ object Pipeline {
         return tracks.mapNotNull { track ->
             if (track.isEmpty()) return@mapNotNull null
             val all = track.map { it.rect }
-            val padX = (all.maxOf { it.width() } * 0.12f).toInt().coerceAtLeast(4)
-            val padY = (all.maxOf { it.height() } * 0.22f).toInt().coerceAtLeast(3)
+            // Expand beyond glyph edges so strokes/shadows of the original subtitle do not leak.
+            // Keep horizontal padding modest to avoid blurring too much of the product/background.
+            val padX = (all.maxOf { it.width() } * 0.16f).toInt().coerceAtLeast((frameWidth * 0.012f).toInt())
+            val padY = (all.maxOf { it.height() } * 0.60f).toInt().coerceAtLeast((frameHeight * 0.008f).toInt())
             val left = (all.minOf { it.left } - padX).coerceAtLeast(0)
             val top = (all.minOf { it.top } - padY).coerceAtLeast(0)
             val right = (all.maxOf { it.right } + padX).coerceAtMost(frameWidth - 1)
