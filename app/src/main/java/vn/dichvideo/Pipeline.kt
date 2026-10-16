@@ -508,8 +508,10 @@ object Pipeline {
                                 // unrelated Chinese text on packaging, labels, or wall calendars.
                                 box.left >= (frameWidth * 0.04f).toInt() &&
                                     box.right <= (frameWidth * 0.96f).toInt() &&
-                                    box.top >= (frameHeight * 0.55f).toInt() &&
-                                    box.bottom <= (frameHeight * 0.97f).toInt() &&
+                                    // Source subtitle in the supplied sample sits around 28% frame height,
+                                    // so do not assume subtitles always live at the bottom of the frame.
+                                    box.top >= (frameHeight * 0.16f).toInt() &&
+                                    box.bottom <= (frameHeight * 0.86f).toInt() &&
                                     box.width() >= (frameWidth * 0.04f).toInt() &&
                                     box.height() >= (frameHeight * 0.008f).toInt()
                             }
