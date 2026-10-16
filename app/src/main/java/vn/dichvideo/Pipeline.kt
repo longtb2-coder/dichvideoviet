@@ -225,7 +225,14 @@ object Pipeline {
             val speechVi = if (speechSegs.isEmpty()) emptyList()
                 else if (useReviewVoice) mergeNearDuplicates(speechSegs.sortedBy { it.start })
                 else translateAll(mergeNearbySpeech(mergeNearDuplicates(speechSegs.sortedBy { it.start })), log)
-            val textVi = if (textSegs.isNotEmpty()) translateAll(mergeNearDuplicates(textSegs.sortedBy { it.start }), log) else emptyList()
+            // In product-review mode, narration is the single subtitle source.
+            // Avoid translating OCR from packaging/brand labels (for example IVSO) as subtitles.
+            val textVi = if (!useReviewVoice && textSegs.isNotEmpty())
+                translateAll(mergeNearDuplicates(textSegs.sortedBy { it.start }), log)
+            else {
+                if (useReviewVoice && textSegs.isNotEmpty()) log("Chế độ review: bỏ dịch OCR thành phụ đề riêng để tránh dịch nhầm tên/nhãn sản phẩm; dùng phụ đề theo kịch bản review.")
+                emptyList()
+            }
             if (speechVi.isEmpty() && textVi.isEmpty()) error("Không tìm thấy lời nói hoặc chữ có thể dịch. Thử video rõ hơn hoặc chọn file SRT.")
             if (speechVi.isNotEmpty()) {
                 if (useReviewVoice) log("Kịch bản review được dùng làm lời thuyết minh; thời điểm phụ đề được ước lượng theo độ dài câu.")
