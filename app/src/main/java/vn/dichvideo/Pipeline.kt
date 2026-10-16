@@ -499,12 +499,12 @@ object Pipeline {
                             }.filter { box ->
                                 // Subtitle replacement should target the lower subtitle band, not
                                 // unrelated Chinese text on packaging, labels, or wall calendars.
-                                box.left >= frameWidth * 0.04 &&
-                                    box.right <= frameWidth * 0.96 &&
-                                    box.top >= frameHeight * 0.55 &&
-                                    box.bottom <= frameHeight * 0.97 &&
-                                    box.width() >= frameWidth * 0.04 &&
-                                    box.height() >= frameHeight * 0.008
+                                box.left >= (frameWidth * 0.04f).toInt() &&
+                                    box.right <= (frameWidth * 0.96f).toInt() &&
+                                    box.top >= (frameHeight * 0.55f).toInt() &&
+                                    box.bottom <= (frameHeight * 0.97f).toInt() &&
+                                    box.width() >= (frameWidth * 0.04f).toInt() &&
+                                    box.height() >= (frameHeight * 0.008f).toInt()
                             }
                             boxes.forEach { box ->
                                 val cx = box.centerX().toFloat()
