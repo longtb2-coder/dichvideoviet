@@ -124,7 +124,7 @@ object ProductReviewEngine {
                         val content = output.optJSONObject(i)?.optJSONArray("content") ?: continue
                         for (j in 0 until content.length()) {
                             val item = content.optJSONObject(j) ?: continue
-                            if (item.optString("type") == "output_text") append(item.optString("text")).append("\\n")
+                            if (item.optString("type") == "output_text") append(item.optString("text")).append("\n")
                         }
                     }
                 }.trim()
