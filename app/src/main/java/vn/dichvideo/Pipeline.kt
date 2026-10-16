@@ -227,8 +227,22 @@ object Pipeline {
                 else translateAll(mergeNearbySpeech(mergeNearDuplicates(speechSegs.sortedBy { it.start })), log)
             // In product-review mode, narration is the single subtitle source.
             // Avoid translating OCR from packaging/brand labels (for example IVSO) as subtitles.
-            val textVi = if (!useReviewVoice && textSegs.isNotEmpty())
-                translateAll(mergeNearDuplicates(textSegs.sortedBy { it.start }), log)
+            // OCR captions often repeat dialogue already translated from speech/SRT.
+            // Remove OCR segments that overlap speech-caption timing to prevent stacked subtitles.
+            val ocrOnlySegs = if (speechSegs.isEmpty() || useReviewVoice) textSegs else {
+                val filtered = textSegs.filterNot { ocr ->
+                    speechSegs.any { speech ->
+                        val overlap = (minOf(ocr.end, speech.end) - maxOf(ocr.start, speech.start)).coerceAtLeast(0.0)
+                        val shorter = minOf((ocr.end - ocr.start).coerceAtLeast(0.1), (speech.end - speech.start).coerceAtLeast(0.1))
+                        overlap >= minOf(0.35, shorter * 0.35)
+                    }
+                }
+                val removed = textSegs.size - filtered.size
+                if (removed > 0) log("Đã bỏ $removed đoạn OCR trùng thời điểm với lời thoại/phụ đề để tránh chồng chữ.")
+                filtered
+            }
+            val textVi = if (!useReviewVoice && ocrOnlySegs.isNotEmpty())
+                translateAll(mergeNearDuplicates(ocrOnlySegs.sortedBy { it.start }), log)
             else {
                 if (useReviewVoice && textSegs.isNotEmpty()) log("Chế độ review: bỏ dịch OCR thành phụ đề riêng để tránh dịch nhầm tên/nhãn sản phẩm; dùng phụ đề theo kịch bản review.")
                 emptyList()
