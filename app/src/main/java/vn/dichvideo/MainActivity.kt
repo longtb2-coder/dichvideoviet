@@ -376,6 +376,25 @@ fun Screen() {
                     maxLines = 8
                 )
                 OutlinedButton(
+                    enabled = reviewOnline && reviewApiKey.isNotBlank() && reviewProductName.isNotBlank() && !busy && !reviewBusy,
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = {
+                        scope.launch {
+                            reviewBusy = true
+                            log = "Đang tìm thông tin sản phẩm trên web…"
+                            try {
+                                val found = ProductReviewEngine.researchProductOnline(
+                                    reviewProductName.trim(), reviewSourceFacts, reviewModel.trim(), reviewApiKey.trim()
+                                )
+                                reviewSourceFacts = (reviewSourceFacts.trim() + "\n\nTHÔNG TIN THAM KHẢO TÌM TRÊN WEB (hãy kiểm tra nguồn):\n" + found).trim().take(12000)
+                                log = "Đã thêm thông tin tham khảo online. Kiểm tra URL và đúng phiên bản sản phẩm trước khi viết lời bán hàng."
+                            } catch (e: Exception) {
+                                log = "Không tìm được thông tin online: \${e.message ?: "lỗi không rõ"}"
+                            } finally { reviewBusy = false }
+                        }
+                    }
+                ) { Text(if (reviewBusy) "Đang tìm thông tin…" else "🌐 Tìm thông tin sản phẩm trên web") }
+                OutlinedButton(
                     enabled = video != null && !busy && !reviewBusy,
                     modifier = Modifier.fillMaxWidth(),
                     onClick = {
