@@ -664,61 +664,63 @@ object Pipeline {
     }
 
     /** Cắt câu bằng Silero VAD rồi nhận dạng từng câu bằng SenseVoice. */
+    /**
+     * Recognize speech in bounded 8-second chunks. This avoids the native VAD streaming
+     * path that can terminate the whole Android process on some devices, and caps memory use.
+     */
     private fun recognize(ctx: Context, input: File, work: File, log: (String) -> Unit): List<Seg> {
-        log("Tách âm thanh…")
+        log("Tách âm thanh thành WAV 16 kHz…")
         val wav = File(work, "audio.wav")
         ff("-y", "-i", input.path, "-vn", "-ac", "1", "-ar", "$SR", "-c:a", "pcm_s16le", wav.path)
+        require(wav.exists() && wav.length() > 44L) { "Không tách được âm thanh từ video. Thử video khác hoặc chọn file SRT." }
 
         val recognizer = OfflineRecognizer(
             config = OfflineRecognizerConfig(
                 modelConfig = OfflineModelConfig(
                     senseVoice = OfflineSenseVoiceModelConfig(
                         model = Models.senseModel(ctx).path, language = "", useInverseTextNormalization = true),
-                    tokens = Models.senseTokens(ctx).path, numThreads = 2, debug = false, provider = "cpu")))
-        val vad = Vad(config = VadModelConfig(
-            sileroVadModelConfig = SileroVadModelConfig(
-                model = Models.vad(ctx).path, threshold = 0.5f, minSilenceDuration = 0.4f,
-                minSpeechDuration = 0.25f, windowSize = 512, maxSpeechDuration = 20f),
-            sampleRate = SR, numThreads = 1, provider = "cpu", debug = false))
-
+                    tokens = Models.senseTokens(ctx).path, numThreads = 1, debug = false, provider = "cpu")))
         val segs = mutableListOf<Seg>()
-        fun drain() {
-            while (!vad.empty()) {
-                val s = vad.front()
-                val stream = recognizer.createStream()
-                stream.acceptWaveform(s.samples, SR)
-                recognizer.decode(stream)
-                val text = recognizer.getResult(stream).text.trim()
-                stream.release()
-                if (text.isNotBlank()) segs += Seg(s.start / SR.toDouble(), (s.start + s.samples.size) / SR.toDouble(), text)
-                vad.pop()
-            }
-        }
         try {
             RandomAccessFile(wav, "r").use { raf ->
                 raf.seek(dataOffset(raf))
-                val total = raf.length()
-                val buf = ByteArray(SR * 2)
+                val dataBytes = (raf.length() - raf.filePointer).coerceAtLeast(0L)
+                val totalSamples = dataBytes / 2L
+                require(totalSamples > 0L) { "Tệp âm thanh tách ra không có dữ liệu." }
+                val samplesPerChunk = SR * 8
+                var sampleStart = 0L
                 var lastPct = -1
-                while (true) {
-                    val n = raf.read(buf)
-                    if (n <= 0) break
-                    val count = n / 2
-                    if (n % 2 == 1) raf.seek(raf.filePointer - 1)
-                    val sh = ByteBuffer.wrap(buf, 0, count * 2).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
-                    val f = FloatArray(count) { sh.get(it) / 32768f }
-                    vad.acceptWaveform(f)
-                    drain()
-                    val pct = (raf.filePointer * 100 / total).toInt() / 10 * 10
-                    if (pct != lastPct) { lastPct = pct; log("Nhận dạng giọng nói… $pct%") }
+                while (sampleStart < totalSamples) {
+                    val count = minOf(samplesPerChunk.toLong(), totalSamples - sampleStart).toInt()
+                    val bytes = ByteArray(count * 2)
+                    raf.readFully(bytes)
+                    val shorts = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
+                    val samples = FloatArray(count) { shorts.get(it) / 32768f }
+                    val stream = recognizer.createStream()
+                    try {
+                        stream.acceptWaveform(samples, SR)
+                        recognizer.decode(stream)
+                        val text = recognizer.getResult(stream).text.trim()
+                        if (text.isNotBlank()) {
+                            val begin = sampleStart / SR.toDouble()
+                            val finish = (sampleStart + count) / SR.toDouble()
+                            segs += Seg(begin, finish, text)
+                        }
+                    } finally {
+                        stream.release()
+                    }
+                    sampleStart += count
+                    val pct = (sampleStart * 100 / totalSamples).toInt() / 10 * 10
+                    if (pct != lastPct) {
+                        lastPct = pct
+                        log("Nhận dạng giọng nói theo từng đoạn… $pct%")
+                    }
                 }
-                vad.flush()
-                drain()
             }
         } finally {
-            vad.release(); recognizer.release()
+            recognizer.release()
         }
-        return segs
+        return mergeNearbySpeech(segs)
     }
 
     private fun dataOffset(raf: RandomAccessFile): Long {
