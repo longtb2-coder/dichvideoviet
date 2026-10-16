@@ -389,7 +389,7 @@ fun Screen() {
                                 reviewSourceFacts = (reviewSourceFacts.trim() + "\n\nTHÔNG TIN THAM KHẢO TÌM TRÊN WEB (hãy kiểm tra nguồn):\n" + found).trim().take(12000)
                                 log = "Đã thêm thông tin tham khảo online. Kiểm tra URL và đúng phiên bản sản phẩm trước khi viết lời bán hàng."
                             } catch (e: Exception) {
-                                log = "Không tìm được thông tin online: \${e.message ?: "lỗi không rõ"}"
+                                log = "Không tìm được thông tin online: ${e.message ?: "lỗi không rõ"}"
                             } finally { reviewBusy = false }
                         }
                     }
